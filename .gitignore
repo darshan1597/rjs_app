@@ -1,0 +1,19 @@
+# Local build and transfer artifacts
+*.apk
+*.aab
+*.bin
+
+# Root-level scratch files
+/test.txt
+/test*.txt
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
