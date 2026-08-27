@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
-import '../../home/screens/home_screen.dart';
+import '../../auth/screens/login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -15,7 +15,7 @@ class _SplashScreenState extends State<SplashScreen>
   late final AnimationController _controller;
   late final Animation<double> _entrance;
   bool _started = false;
-  bool _showHome = false;
+  bool _showLogin = false;
 
   @override
   void initState() {
@@ -55,15 +55,29 @@ class _SplashScreenState extends State<SplashScreen>
         const AssetImage('assets/images/book-fleet-popout-3d-transparent.png'),
         context,
       ),
+      precacheImage(
+        const AssetImage('assets/images/login-logo-transparent.png'),
+        context,
+      ),
+      precacheImage(
+        const AssetImage('assets/images/login-city-background.png'),
+        context,
+      ),
+      precacheImage(const AssetImage('assets/images/popup-car.png'), context),
+      precacheImage(const AssetImage('assets/images/popup-bus.png'), context),
+      precacheImage(
+        const AssetImage('assets/images/popup-tempo-traveller.png'),
+        context,
+      ),
     ]);
     if (!mounted) return;
     await _controller.forward();
-    _openHome();
+    _openLogin();
   }
 
-  void _openHome() {
+  void _openLogin() {
     if (!mounted) return;
-    setState(() => _showHome = true);
+    setState(() => _showLogin = true);
   }
 
   @override
@@ -85,8 +99,8 @@ class _SplashScreenState extends State<SplashScreen>
       opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
       child: child,
     ),
-    child: _showHome
-        ? const HomeScreen(key: ValueKey('home-screen'))
+    child: _showLogin
+        ? const LoginScreen(key: ValueKey('login-screen'))
         : _splashContent(),
   );
 

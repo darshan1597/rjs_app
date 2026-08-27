@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_colors.dart';
+import '../../core/theme/app_colors.dart';
 import 'rjs_logo.dart';
 
 Future<void> showRjsDrawer(BuildContext context) => showGeneralDialog<void>(

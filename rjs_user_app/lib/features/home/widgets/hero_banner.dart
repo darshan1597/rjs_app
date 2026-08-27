@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
-import 'rjs_logo.dart';
+import '../../../shared/widgets/rjs_logo.dart';
 
 class HeroBanner extends StatelessWidget {
   const HeroBanner({super.key});

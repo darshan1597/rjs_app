@@ -11,7 +11,7 @@ class HomeHeader extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
     child: Row(
       children: [
-        _button(Icons.menu_rounded, onPressed: onMenuTap),
+        _button(Icons.menu_rounded, onPressed: onMenuTap, filled: true),
         const Spacer(),
         Stack(
           clipBehavior: Clip.none,
@@ -35,9 +35,28 @@ class HomeHeader extends StatelessWidget {
       ],
     ),
   );
-  Widget _button(IconData icon, {VoidCallback? onPressed}) => IconButton(
-    onPressed: onPressed ?? () {},
-    icon: Icon(icon, size: 29, color: AppColors.navy),
-    style: IconButton.styleFrom(padding: EdgeInsets.zero),
+  Widget _button(
+    IconData icon, {
+    VoidCallback? onPressed,
+    bool filled = false,
+  }) => Container(
+    decoration: BoxDecoration(
+      color: filled ? Colors.white : Colors.transparent,
+      shape: BoxShape.circle,
+      boxShadow: filled
+          ? const [
+              BoxShadow(
+                color: Color(0x180A244A),
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+            ]
+          : null,
+    ),
+    child: IconButton(
+      onPressed: onPressed ?? () {},
+      icon: Icon(icon, size: 29, color: AppColors.navy),
+      style: IconButton.styleFrom(padding: EdgeInsets.zero),
+    ),
   );
 }
