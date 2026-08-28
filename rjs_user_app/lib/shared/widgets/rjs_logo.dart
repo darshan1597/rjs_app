@@ -10,7 +10,7 @@ class RjsLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!light) {
       return Image.asset(
-        'assets/images/rjs-logo-official.png',
+        'assets/images/login-logo-transparent.png',
         width: size * 1.5,
         height: size * 1.5,
         fit: BoxFit.contain,

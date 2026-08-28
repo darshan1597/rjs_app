@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
+import '../../../shared/widgets/app_page_header.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 
 class OutstationTripScreen extends StatefulWidget {
@@ -39,10 +40,18 @@ class _OutstationTripScreenState extends State<OutstationTripScreen> {
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
-            child: _Header(onMenuTap: () => showRjsDrawer(context)),
+            child: AppPageHeader(
+              title: 'Outstation Trip',
+              onMenuTap: () => showRjsDrawer(context),
+            ),
           ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 118),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              8,
+              16,
+              118 + MediaQuery.paddingOf(context).bottom,
+            ),
             sliver: SliverList.list(
               children: [
                 const _OutstationBanner(),
@@ -75,6 +84,8 @@ class _OutstationTripScreenState extends State<OutstationTripScreen> {
   );
 }
 
+// Kept temporarily while the shared header migration settles.
+// ignore: unused_element
 class _Header extends StatelessWidget {
   const _Header({required this.onMenuTap});
   final VoidCallback onMenuTap;

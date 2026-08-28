@@ -4,6 +4,14 @@ import '../../../core/theme/app_colors.dart';
 
 class LocationCard extends StatelessWidget {
   const LocationCard({super.key});
+
+  String get _greeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.fromLTRB(15, 13, 15, 13),
@@ -21,6 +29,26 @@ class LocationCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Center(
+          child: Container(
+            width: 42,
+            height: 4,
+            decoration: BoxDecoration(
+              color: const Color(0xFFCBD2DE),
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '$_greeting, Darshan',
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppColors.muted,
+          ),
+        ),
+        const SizedBox(height: 4),
         const Text(
           'Where can we take you?',
           style: TextStyle(

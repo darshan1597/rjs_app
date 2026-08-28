@@ -3,37 +3,44 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import 'rjs_logo.dart';
 
-Future<void> showRjsDrawer(BuildContext context) => showGeneralDialog<void>(
-  context: context,
-  barrierDismissible: true,
-  barrierLabel: 'Close navigation menu',
-  barrierColor: Colors.black.withValues(alpha: .32),
-  transitionDuration: const Duration(milliseconds: 360),
-  pageBuilder: (context, animation, secondaryAnimation) => const Align(
-    alignment: Alignment.centerLeft,
-    child: Material(color: Colors.transparent, child: AppDrawer()),
-  ),
-  transitionBuilder: (context, animation, secondaryAnimation, child) {
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    return FadeTransition(
-      opacity: curved,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(-1.04, 0),
-          end: Offset.zero,
-        ).animate(curved),
-        child: child,
+Future<void> showRjsDrawer(BuildContext context) {
+  final activeRoute = ModalRoute.of(context)?.settings.name ?? '/home';
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Close navigation menu',
+    barrierColor: Colors.black.withValues(alpha: .32),
+    transitionDuration: const Duration(milliseconds: 360),
+    pageBuilder: (context, animation, secondaryAnimation) => Align(
+      alignment: Alignment.centerLeft,
+      child: Material(
+        color: Colors.transparent,
+        child: AppDrawer(activeRoute: activeRoute),
       ),
-    );
-  },
-);
+    ),
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(-1.04, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        ),
+      );
+    },
+  );
+}
 
 class AppDrawer extends StatelessWidget {
-  const AppDrawer({super.key});
+  const AppDrawer({super.key, required this.activeRoute});
+  final String activeRoute;
 
   @override
   Widget build(BuildContext context) => Drawer(
@@ -52,24 +59,48 @@ class AppDrawer extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
               children: [
-                _item(context, Icons.home_rounded, 'Home', selected: true),
-                _item(context, Icons.route_rounded, 'My Rides'),
-                _item(context, Icons.account_balance_wallet_rounded, 'Wallet'),
-                _item(context, Icons.location_on_rounded, 'Saved Places'),
                 _item(
                   context,
-                  Icons.notifications_rounded,
-                  'Notifications',
-                  badge: '2',
+                  Icons.home_rounded,
+                  'Home',
+                  selected: activeRoute == '/home',
+                  onTap: () => _openRoute(context, '/home'),
                 ),
+                _item(
+                  context,
+                  Icons.route_rounded,
+                  'My Rides',
+                  selected: activeRoute == '/bookings',
+                  onTap: () => _openRoute(context, '/bookings'),
+                ),
+                _item(
+                  context,
+                  Icons.account_balance_wallet_rounded,
+                  'Wallet',
+                  selected: activeRoute == '/wallet',
+                  onTap: () => _openRoute(context, '/wallet'),
+                ),
+                _item(context, Icons.location_on_rounded, 'Saved Places'),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   child: Divider(color: Color(0xFFE9ECF1)),
                 ),
                 _item(context, Icons.verified_user_rounded, 'Safety Centre'),
-                _item(context, Icons.help_rounded, 'Help & Support'),
+                _item(
+                  context,
+                  Icons.help_rounded,
+                  'Help & Support',
+                  selected: activeRoute == '/help-support',
+                  onTap: () => _openRoute(context, '/help-support'),
+                ),
                 _item(context, Icons.settings_rounded, 'Settings'),
-                _item(context, Icons.info_rounded, 'About RJS'),
+                _item(
+                  context,
+                  Icons.info_rounded,
+                  'About RJS',
+                  selected: activeRoute == '/about',
+                  onTap: () => _openRoute(context, '/about'),
+                ),
               ],
             ),
           ),
@@ -123,44 +154,60 @@ class AppDrawer extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Container(
-              width: 54,
-              height: 54,
-              decoration: const BoxDecoration(
-                color: Color(0xFFEAF2FF),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.person_rounded,
-                color: AppColors.blue,
-                size: 32,
-              ),
+        InkWell(
+          onTap: () => _openRoute(context, '/profile'),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: activeRoute == '/profile'
+                  ? const Color(0xFFEFF5FF)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
             ),
-            const SizedBox(width: 13),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Welcome to RJS',
-                    style: TextStyle(
-                      color: AppColors.navy,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
+            child: Row(
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEAF2FF),
+                    shape: BoxShape.circle,
                   ),
-                  SizedBox(height: 3),
-                  Text(
-                    'View and edit profile',
-                    style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+                  child: const Icon(
+                    Icons.person_rounded,
+                    color: AppColors.blue,
+                    size: 32,
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 13),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Darshan',
+                        style: TextStyle(
+                          color: AppColors.navy,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'View and edit profile',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+              ],
             ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-          ],
+          ),
         ),
       ],
     ),
@@ -172,10 +219,9 @@ class AppDrawer extends StatelessWidget {
     String title, {
     bool selected = false,
     String? badge,
+    VoidCallback? onTap,
   }) => ListTile(
-    onTap: () {
-      if (selected) Navigator.pop(context);
-    },
+    onTap: onTap,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     tileColor: selected ? const Color(0xFFEFF5FF) : Colors.transparent,
     leading: Icon(
@@ -215,4 +261,17 @@ class AppDrawer extends StatelessWidget {
             ),
           ),
   );
+
+  void _openRoute(BuildContext context, String route) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    if (route == activeRoute) return;
+    Future<void>.microtask(() {
+      if (route == '/home') {
+        navigator.pushNamedAndRemoveUntil(route, (_) => false);
+      } else {
+        navigator.pushNamed(route);
+      }
+    });
+  }
 }

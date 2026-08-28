@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
+import '../../../shared/widgets/app_page_header.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 
 class ScheduleRideScreen extends StatefulWidget {
@@ -49,17 +50,27 @@ class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
       if (index == 0) Navigator.pop(context);
     },
     body: SafeArea(
+      top: false,
       bottom: false,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(child: _ScheduleHeader(onMenuTap: _openDrawer)),
+          SliverToBoxAdapter(
+            child: AppPageHeader(
+              title: 'Schedule Ride',
+              backgroundAsset: 'assets/images/schedule-banner-artwork.png',
+              onMenuTap: _openDrawer,
+            ),
+          ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 118),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              8,
+              16,
+              118 + MediaQuery.paddingOf(context).bottom,
+            ),
             sliver: SliverList.list(
               children: [
-                const _ReferencePlanningBanner(),
-                const SizedBox(height: 14),
                 const _AlignedLocationSection(),
                 const SizedBox(height: 12),
                 const _DateTimeSection(),
@@ -87,6 +98,8 @@ class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
   void _openDrawer() => showRjsDrawer(context);
 }
 
+// Kept temporarily while the shared header migration settles.
+// ignore: unused_element
 class _ScheduleHeader extends StatelessWidget {
   const _ScheduleHeader({required this.onMenuTap});
 
@@ -168,6 +181,7 @@ class _ScheduleHeader extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _ReferencePlanningBanner extends StatelessWidget {
   const _ReferencePlanningBanner();
 

@@ -10,7 +10,7 @@ class MapBookingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 400,
+    height: 430,
     child: Stack(
       clipBehavior: Clip.none,
       children: [

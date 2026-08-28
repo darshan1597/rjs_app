@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
+import '../../../shared/widgets/app_page_header.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 
 class CityRoundTripScreen extends StatefulWidget {
@@ -33,17 +34,27 @@ class _CityRoundTripScreenState extends State<CityRoundTripScreen> {
       if (index == 0) Navigator.pop(context);
     },
     body: SafeArea(
+      top: false,
       bottom: false,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(child: _Header(onMenuTap: _openDrawer)),
+          SliverToBoxAdapter(
+            child: AppPageHeader(
+              title: 'City Round Trip',
+              backgroundAsset: 'assets/images/city-round-trip-banner.png',
+              onMenuTap: _openDrawer,
+            ),
+          ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 7, 16, 118),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              7,
+              16,
+              118 + MediaQuery.paddingOf(context).bottom,
+            ),
             sliver: SliverList.list(
               children: [
-                const _RoundTripBanner(),
-                const SizedBox(height: 13),
                 const _LocationPanel(),
                 const SizedBox(height: 12),
                 _DateTimePanel(
@@ -91,6 +102,8 @@ class _CityRoundTripScreenState extends State<CityRoundTripScreen> {
   void _openDrawer() => showRjsDrawer(context);
 }
 
+// Kept temporarily while the shared header migration settles.
+// ignore: unused_element
 class _Header extends StatelessWidget {
   const _Header({required this.onMenuTap});
   final VoidCallback onMenuTap;
@@ -171,6 +184,7 @@ class _Header extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _RoundTripBanner extends StatelessWidget {
   const _RoundTripBanner();
 

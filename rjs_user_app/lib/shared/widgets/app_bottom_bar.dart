@@ -45,7 +45,7 @@ class _AppBottomBarState extends State<AppBottomBar>
   Widget build(BuildContext context) {
     final bottom = MediaQuery.paddingOf(context).bottom;
     return Container(
-      height: 98,
+      height: 98 + bottom,
       padding: EdgeInsets.only(bottom: bottom),
       decoration: const BoxDecoration(
         color: Colors.white,

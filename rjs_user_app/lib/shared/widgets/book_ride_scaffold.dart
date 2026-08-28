@@ -128,6 +128,18 @@ class _BookRideScaffoldState extends State<BookRideScaffold>
             return;
           }
           if (_showPopup) _closePopup();
+          if (index == widget.selectedIndex) return;
+          final route = switch (index) {
+            0 => '/home',
+            1 => '/bookings',
+            3 => '/wallet',
+            4 => '/profile',
+            _ => null,
+          };
+          if (route != null) {
+            Navigator.of(context).pushNamedAndRemoveUntil(route, (_) => false);
+            return;
+          }
           widget.onSelected(index);
         },
       ),

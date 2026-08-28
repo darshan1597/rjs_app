@@ -7,12 +7,14 @@ class JourneyPlanner extends StatelessWidget {
     super.key,
     required this.onScheduleRide,
     required this.onCityRoundTrip,
-    required this.onOutstationTrip,
+    required this.onTourPackages,
+    required this.onRentalPackage,
   });
 
   final VoidCallback onScheduleRide;
   final VoidCallback onCityRoundTrip;
-  final VoidCallback onOutstationTrip;
+  final VoidCallback onTourPackages;
+  final VoidCallback onRentalPackage;
 
   static const _options = [
     _JourneyOption(
@@ -30,9 +32,9 @@ class JourneyPlanner extends StatelessWidget {
       background: Colors.white,
     ),
     _JourneyOption(
-      title: 'Outstation Trip',
-      subtitle: 'Travel out of town',
-      icon: Icons.route_rounded,
+      title: 'Tour Packages',
+      subtitle: 'Discover destinations',
+      icon: Icons.explore_rounded,
       color: Color(0xFF6554C0),
       background: Colors.white,
     ),
@@ -74,7 +76,8 @@ class JourneyPlanner extends StatelessWidget {
           onTap: switch (index) {
             0 => onScheduleRide,
             1 => onCityRoundTrip,
-            2 => onOutstationTrip,
+            2 => onTourPackages,
+            3 => onRentalPackage,
             _ => () {},
           },
         ),

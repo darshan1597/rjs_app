@@ -198,7 +198,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Spacer(),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(25, 48, 25, 22),
+                    padding: EdgeInsets.fromLTRB(
+                      25,
+                      48,
+                      25,
+                      22 + MediaQuery.paddingOf(context).bottom,
+                    ),
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,

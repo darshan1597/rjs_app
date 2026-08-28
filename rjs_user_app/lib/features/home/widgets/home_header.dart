@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/notification_popup.dart';
 
 class HomeHeader extends StatelessWidget {
   const HomeHeader({super.key, required this.onMenuTap});
@@ -8,7 +9,12 @@ class HomeHeader extends StatelessWidget {
   final VoidCallback onMenuTap;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+    padding: EdgeInsets.fromLTRB(
+      16,
+      MediaQuery.paddingOf(context).top + 8,
+      16,
+      10,
+    ),
     child: Row(
       children: [
         _button(Icons.menu_rounded, onPressed: onMenuTap, filled: true),
@@ -16,7 +22,11 @@ class HomeHeader extends StatelessWidget {
         Stack(
           clipBehavior: Clip.none,
           children: [
-            _button(Icons.notifications_none_rounded),
+            _button(
+              Icons.notifications_none_rounded,
+              onPressed: () => showRjsNotifications(context),
+              filled: true,
+            ),
             Positioned(
               right: 7,
               top: 7,
