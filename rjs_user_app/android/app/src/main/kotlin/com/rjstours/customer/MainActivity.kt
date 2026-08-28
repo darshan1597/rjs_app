@@ -1,4 +1,4 @@
-package com.example.rjs_user_app
+package com.rjstours.customer
 
 import io.flutter.embedding.android.FlutterActivity
 

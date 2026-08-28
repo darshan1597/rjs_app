@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.rjs_user_app"
+    namespace = "com.rjstours.customer"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.rjs_user_app"
+        applicationId = "com.rjstours.customer"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
