@@ -1,12 +1,47 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/customer_auth_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
+import '../../../shared/widgets/customer_logout.dart';
 import '../../../shared/widgets/notification_popup.dart';
+import 'personal_information_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? _customer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCustomer();
+  }
+
+  Future<void> _loadCustomer() async {
+    final cached = await CustomerAuthService.getCachedCustomer();
+    if (mounted && cached != null) setState(() => _customer = cached);
+    final current = await CustomerAuthService.getMe();
+    if (mounted && current != null) setState(() => _customer = current);
+  }
+
+  Future<void> _editPersonalInformation() async {
+    final customer = _customer;
+    if (customer == null) return;
+    final updated = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PersonalInformationScreen(customer: customer),
+      ),
+    );
+    if (mounted && updated != null) setState(() => _customer = updated);
+  }
 
   @override
   Widget build(BuildContext context) => BookRideScaffold(
@@ -32,11 +67,15 @@ class ProfileScreen extends StatelessWidget {
               children: [
                 _ProfileHeader(onMenu: () => showRjsDrawer(context)),
                 const SizedBox(height: 15),
-                const _ProfileCard(),
+                _ProfileCard(customer: _customer),
                 const SizedBox(height: 12),
                 const _BookingsPanel(),
                 const SizedBox(height: 12),
-                const _SettingsPanel(),
+                _SettingsPanel(
+                  onPersonalInformation: _editPersonalInformation,
+                  onAddresses: () =>
+                      Navigator.pushNamed(context, '/saved-places'),
+                ),
                 const SizedBox(height: 12),
                 const _LogoutButton(),
               ],
@@ -140,7 +179,18 @@ class _HeaderIcon extends StatelessWidget {
 }
 
 class _ProfileCard extends StatelessWidget {
-  const _ProfileCard();
+  const _ProfileCard({required this.customer});
+
+  final Map<String, dynamic>? customer;
+
+  String get _phone {
+    final raw = customer?['phone'] as String? ?? '';
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 12) {
+      return '+${digits.substring(0, 2)} ${digits.substring(2, 7)} ${digits.substring(7)}';
+    }
+    return raw.isEmpty ? 'Mobile number' : raw;
+  }
 
   @override
   Widget build(BuildContext context) => Container(
@@ -207,23 +257,28 @@ class _ProfileCard extends StatelessWidget {
           ],
         ),
         const SizedBox(width: 20),
-        const Expanded(
+        Expanded(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Darshan',
-                style: TextStyle(
+                customer?['name'] as String? ?? 'Loading...',
+                style: const TextStyle(
                   color: AppColors.navy,
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              SizedBox(height: 9),
-              _ContactLine(Icons.phone_outlined, '+91 98765 43210'),
-              SizedBox(height: 7),
-              _ContactLine(Icons.mail_outline_rounded, 'darshanr@gmail.com'),
+              const SizedBox(height: 9),
+              _ContactLine(Icons.phone_outlined, _phone),
+              const SizedBox(height: 7),
+              _ContactLine(
+                Icons.mail_outline_rounded,
+                (customer?['email'] as String?)?.isNotEmpty == true
+                    ? customer!['email'] as String
+                    : 'Email not added',
+              ),
             ],
           ),
         ),
@@ -324,7 +379,13 @@ class _BookingsPanel extends StatelessWidget {
 }
 
 class _SettingsPanel extends StatelessWidget {
-  const _SettingsPanel();
+  const _SettingsPanel({
+    required this.onPersonalInformation,
+    required this.onAddresses,
+  });
+
+  final VoidCallback onPersonalInformation;
+  final VoidCallback onAddresses;
   static const items = [
     (
       Icons.person_outline_rounded,
@@ -360,54 +421,64 @@ class _SettingsPanel extends StatelessWidget {
         const SizedBox(height: 9),
         ...List.generate(
           items.length,
-          (i) => Container(
-            padding: const EdgeInsets.symmetric(vertical: 9),
-            decoration: BoxDecoration(
-              border: i == items.length - 1
-                  ? null
-                  : const Border(bottom: BorderSide(color: Color(0xFFE8EBF0))),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0F5FF),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(items[i].$1, color: AppColors.blue, size: 19),
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        items[i].$2,
-                        style: const TextStyle(
-                          color: AppColors.navy,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
+          (i) => InkWell(
+            onTap: i == 0
+                ? onPersonalInformation
+                : i == 2
+                ? onAddresses
+                : null,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              decoration: BoxDecoration(
+                border: i == items.length - 1
+                    ? null
+                    : const Border(
+                        bottom: BorderSide(color: Color(0xFFE8EBF0)),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        items[i].$3,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 9,
-                        ),
-                      ),
-                    ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F5FF),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(items[i].$1, color: AppColors.blue, size: 19),
                   ),
-                ),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.muted,
-                  size: 20,
-                ),
-              ],
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          items[i].$2,
+                          style: const TextStyle(
+                            color: AppColors.navy,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          items[i].$3,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.muted,
+                    size: 20,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -433,7 +504,7 @@ class _LogoutButton extends StatelessWidget {
       ],
     ),
     child: TextButton.icon(
-      onPressed: () {},
+      onPressed: () => confirmCustomerLogout(context),
       icon: const Icon(Icons.logout_rounded, color: Colors.red, size: 20),
       label: const Text(
         'Logout',

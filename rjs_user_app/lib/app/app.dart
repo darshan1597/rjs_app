@@ -8,6 +8,7 @@ import '../features/bookings/screens/bookings_screen.dart';
 import '../features/about/screens/about_rjs_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/wallet/screens/wallet_screen.dart';
+import '../features/saved_places/screens/saved_places_screen.dart';
 
 class RjsApp extends StatelessWidget {
   const RjsApp({super.key});
@@ -24,6 +25,7 @@ class RjsApp extends StatelessWidget {
       '/about': (_) => const AboutRjsScreen(),
       '/wallet': (_) => const WalletScreen(),
       '/profile': (_) => const ProfileScreen(),
+      '/saved-places': (_) => const SavedPlacesScreen(),
     },
   );
 }

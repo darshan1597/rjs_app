@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/network/customer_auth_service.dart';
 import '../../core/theme/app_colors.dart';
+import 'customer_logout.dart';
 import 'rjs_logo.dart';
 
 Future<void> showRjsDrawer(BuildContext context) {
@@ -80,7 +82,13 @@ class AppDrawer extends StatelessWidget {
                   selected: activeRoute == '/wallet',
                   onTap: () => _openRoute(context, '/wallet'),
                 ),
-                _item(context, Icons.location_on_rounded, 'Saved Places'),
+                _item(
+                  context,
+                  Icons.location_on_rounded,
+                  'Saved Places',
+                  selected: activeRoute == '/saved-places',
+                  onTap: () => _openRoute(context, '/saved-places'),
+                ),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   child: Divider(color: Color(0xFFE9ECF1)),
@@ -105,33 +113,38 @@ class AppDrawer extends StatelessWidget {
             ),
           ),
           const Divider(height: 1, color: Color(0xFFE9ECF1)),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.logout_rounded,
-                  color: AppColors.orange,
-                  size: 21,
-                ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Log out',
-                  style: TextStyle(
+          InkWell(
+            onTap: () async {
+              await confirmCustomerLogout(context);
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.logout_rounded,
                     color: AppColors.orange,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    size: 21,
                   ),
-                ),
-                const Spacer(),
-                Text(
-                  'v1.0.0',
-                  style: TextStyle(
-                    color: AppColors.muted.withValues(alpha: .75),
-                    fontSize: 11,
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Log out',
+                    style: TextStyle(
+                      color: AppColors.orange,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                  const Spacer(),
+                  Text(
+                    'v1.0.0',
+                    style: TextStyle(
+                      color: AppColors.muted.withValues(alpha: .75),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -181,20 +194,23 @@ class AppDrawer extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 13),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Darshan',
-                        style: TextStyle(
-                          color: AppColors.navy,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future: CustomerAuthService.getCachedCustomer(),
+                        builder: (context, snapshot) => Text(
+                          snapshot.data?['name'] as String? ?? 'RJS Customer',
+                          style: const TextStyle(
+                            color: AppColors.navy,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                      SizedBox(height: 3),
-                      Text(
+                      const SizedBox(height: 3),
+                      const Text(
                         'View and edit profile',
                         style: TextStyle(
                           color: AppColors.muted,

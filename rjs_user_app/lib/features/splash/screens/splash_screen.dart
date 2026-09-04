@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../auth/screens/login_screen.dart';
+import '../../../core/network/customer_auth_service.dart';
+import '../../home/screens/home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -72,7 +74,14 @@ class _SplashScreenState extends State<SplashScreen>
     ]);
     if (!mounted) return;
     await _controller.forward();
-    _openLogin();
+    if (await CustomerAuthService.restoreSession()) {
+      if (!mounted) return;
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+    } else {
+      _openLogin();
+    }
   }
 
   void _openLogin() {

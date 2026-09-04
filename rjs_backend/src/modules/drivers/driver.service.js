@@ -1,0 +1,67 @@
+import { AppError } from '../../common/errors/app-error.js';
+import { Driver } from './driver.model.js';
+import { Booking } from '../bookings/booking.model.js';
+import { DriverPayout } from '../payments/payment.model.js';
+import jwt from 'jsonwebtoken';
+import { env } from '../../config/env.js';
+
+async function listDrivers({ page, limit, search, status, vehicleType }) {
+  const filter = {};
+  if (status) filter.status = status;
+  if (vehicleType) filter['vehicle.category'] = vehicleType;
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.$or = [
+      { 'personal.fullName': { $regex: escaped, $options: 'i' } }, { 'personal.phone': { $regex: escaped, $options: 'i' } },
+      { driverCode: { $regex: escaped, $options: 'i' } }, { 'vehicle.registrationNumber': { $regex: escaped, $options: 'i' } },
+    ];
+  }
+  const [items, total] = await Promise.all([
+    Driver.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit), Driver.countDocuments(filter),
+  ]);
+  return { items, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+}
+
+async function createDriver(data, creatorId) {
+  let verification;
+  try {
+    verification = jwt.verify(data.phoneVerificationToken, env.ACCESS_TOKEN_SECRET, { issuer: 'rjs-backend', audience: 'rjs-driver-registration' });
+  } catch (_) {
+    throw new AppError(400, 'PHONE_VERIFICATION_REQUIRED', 'Verify the driver phone number again');
+  }
+  const phone = String(data.personal.phone).replace(/\D/g, '').slice(-10);
+  if (verification.purpose !== 'driver_phone_verification' || verification.phone !== phone || String(verification.adminId) !== String(creatorId)) {
+    throw new AppError(400, 'PHONE_VERIFICATION_MISMATCH', 'The verified phone number does not match the driver phone number');
+  }
+  delete data.phoneVerificationToken;
+  data.personal.phoneVerifiedAt = new Date();
+  const duplicate = await Driver.findOne({ $or: [
+    { 'personal.phone': data.personal.phone }, { 'licence.number': data.licence.number.toUpperCase() },
+    { 'vehicle.registrationNumber': data.vehicle.registrationNumber.toUpperCase() },
+  ] });
+  if (duplicate) throw new AppError(409, 'DRIVER_ALREADY_EXISTS', 'A driver, licence, or vehicle with these details already exists');
+  return Driver.create({ ...data, createdBy: creatorId });
+}
+
+async function updateDriverStatus(driverId, status) {
+  const driver = await Driver.findByIdAndUpdate(driverId, { status }, { new: true, runValidators: true });
+  if (!driver) throw new AppError(404, 'DRIVER_NOT_FOUND', 'Driver was not found');
+  return driver;
+}
+
+async function getDriverDetails(driverId) {
+  const driver = await Driver.findById(driverId).lean();
+  if (!driver) throw new AppError(404, 'DRIVER_NOT_FOUND', 'Driver was not found');
+  const [bookings, payoutSummary] = await Promise.all([
+    Booking.find({ currentDriverId: driverId }).sort({ scheduledStartAt: -1 }).limit(12).select('bookingNumber serviceType pickup destination packageName scheduledStartAt scheduledEndAt status passengerCount').lean(),
+    DriverPayout.aggregate([{ $match: { driverId: driver._id } }, { $group: { _id: null, totalPaid: { $sum: { $cond: [{ $eq: ['$status', 'PAID'] }, '$netPayout', 0] } }, pendingPayout: { $sum: { $cond: [{ $in: ['$status', ['PENDING', 'PROCESSING']] }, '$netPayout', 0] } }, completedTrips: { $sum: '$completedTrips' } } }]),
+  ]);
+  return {
+    ...driver,
+    bank: { accountHolderName: driver.bank?.accountHolderName, accountNumber: `••••${driver.bank?.accountNumber?.slice(-4) || ''}`, ifscCode: driver.bank?.ifscCode, upiId: driver.bank?.upiId, proofFileName: driver.bank?.proofFileName, proofUrl: driver.bank?.proofUrl },
+    bookings,
+    earnings: payoutSummary[0] || { totalPaid: 0, pendingPayout: 0, completedTrips: 0 },
+  };
+}
+
+export { createDriver, getDriverDetails, listDrivers, updateDriverStatus };

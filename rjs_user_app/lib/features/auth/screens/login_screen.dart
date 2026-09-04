@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
-import '../../home/screens/home_screen.dart';
+import '../../../core/network/customer_auth_service.dart';
+import 'otp_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,6 +13,9 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _accepted = true;
+  final _phoneController = TextEditingController();
+  bool _loading = false;
+  String? _error;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -103,8 +107,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 color: const Color(0xFFE1E4EA),
                               ),
                               const SizedBox(width: 14),
-                              const Expanded(
+                              Expanded(
                                 child: TextField(
+                                  controller: _phoneController,
                                   keyboardType: TextInputType.phone,
                                   maxLength: 10,
                                   style: TextStyle(
@@ -131,7 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           width: double.infinity,
                           height: 58,
                           child: FilledButton(
-                            onPressed: _accepted ? _continueToHome : null,
+                            onPressed: _accepted && !_loading ? _continueToOtp : null,
                             style: FilledButton.styleFrom(
                               backgroundColor: AppColors.orange,
                               disabledBackgroundColor: const Color(0xFFFFB282),
@@ -139,13 +144,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderRadius: BorderRadius.circular(15),
                               ),
                             ),
-                            child: const Stack(
+                            child: Stack(
                               alignment: Alignment.center,
                               children: [
                                 Center(
                                   child: Text(
-                                    'Continue',
-                                    style: TextStyle(
+                                    _loading ? 'Sending OTP...' : 'Continue',
+                                    style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 17,
                                       fontWeight: FontWeight.w800,
@@ -164,6 +169,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
+                        if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 10.5))),
                         const SizedBox(height: 25),
                         const SizedBox(
                           width: 300,
@@ -296,20 +302,13 @@ class _LoginScreenState extends State<LoginScreen> {
     ),
   );
 
-  void _continueToHome() {
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder<void>(
-        transitionDuration: const Duration(milliseconds: 550),
-        pageBuilder: (_, _, _) => const HomeScreen(),
-        transitionsBuilder: (_, animation, _, child) => FadeTransition(
-          opacity: CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeInOutCubic,
-          ),
-          child: child,
-        ),
-      ),
-    );
+  Future<void> _continueToOtp() async {
+    final phone = _phoneController.text.trim();
+    if (!RegExp(r'^\d{10}$').hasMatch(phone)) { setState(() => _error = 'Enter a valid 10-digit mobile number'); return; }
+    setState(() { _loading = true; _error = null; });
+    try { await CustomerAuthService.requestOtp(phone); if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => OtpVerificationScreen(phone: phone))); }
+    catch (error) { if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => _loading = false); }
   }
 }
 

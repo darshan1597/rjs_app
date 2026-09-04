@@ -1,0 +1,8 @@
+import { writeAuditLog } from '../audit/audit.service.js';
+import { addBookingNote as addNoteRecord, assignDriver as assignRecord, eligibleDrivers as findEligible, getBookingDetails as getDetails, listBookings as listRecords } from './booking.service.js';
+async function listBookings(req, res, next) { try { return res.json({ success: true, data: await listRecords(req.validated.query) }); } catch (error) { return next(error); } }
+async function eligibleDrivers(req, res, next) { try { const result = await findEligible(req.validated.params.bookingId); return res.json({ success: true, data: { items: result.drivers } }); } catch (error) { return next(error); } }
+async function assignDriver(req, res, next) { try { const booking = await assignRecord(req.validated.params.bookingId, req.validated.body.driverId, req.admin.id, req.validated.body.reason); await writeAuditLog({ req, action: 'booking.driver.assign', actor: req.admin, targetType: 'Booking', targetId: booking.id, metadata: req.validated.body }); return res.json({ success: true, data: booking }); } catch (error) { return next(error); } }
+async function getBookingDetails(req,res,next){try{return res.json({success:true,data:await getDetails(req.validated.params.bookingId)})}catch(error){return next(error)}}
+async function addBookingNote(req,res,next){try{const note=await addNoteRecord(req.validated.params.bookingId,req.validated.body.text,req.admin);await writeAuditLog({req,action:'booking.note.add',actor:req.admin,targetType:'Booking',targetId:req.validated.params.bookingId});return res.status(201).json({success:true,data:note})}catch(error){return next(error)}}
+export { addBookingNote, assignDriver, eligibleDrivers, getBookingDetails, listBookings };

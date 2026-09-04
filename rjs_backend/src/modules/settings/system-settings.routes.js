@@ -1,0 +1,11 @@
+import express from 'express';
+import { validate } from '../../common/middleware/validate.js';
+import { authenticateAdmin, requireSuperAdmin } from '../admins/admin-auth.middleware.js';
+import { getSettings, revokeEmployeeSessions, updateSettings } from './system-settings.controller.js';
+import { updateSystemSettingsSchema } from './system-settings.schemas.js';
+const systemSettingsRouter = express.Router();
+systemSettingsRouter.use(authenticateAdmin, requireSuperAdmin);
+systemSettingsRouter.get('/', getSettings);
+systemSettingsRouter.patch('/', validate(updateSystemSettingsSchema), updateSettings);
+systemSettingsRouter.post('/revoke-employee-sessions', revokeEmployeeSessions);
+export { systemSettingsRouter };

@@ -17,3 +17,16 @@
 Thumbs.db
 .idea/
 *.iml
+
+# Runtime uploads (stored externally in production)
+rjs_backend/uploads/
+
+# Node dependencies
+**/node_modules/
+
+# Frontend build output and caches
+rjs_admin/dist/
+**/.vite/
+
+# Generated build folders
+**/build/

@@ -1,11 +1,110 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 import '../../../shared/widgets/notification_popup.dart';
+import '../../rides/screens/driver_search_screen.dart';
+import '../../rides/services/customer_booking_service.dart';
 
 enum _TripFilter { all, live, upcoming, completed }
+
+String _vehicleLabel(String value) => switch (value) {
+  'TEMPO_TRAVELLER' => 'Tempo Traveller',
+  'HATCHBACK' => 'Hatchback',
+  'SEDAN' => 'Sedan',
+  'SUV' => 'SUV',
+  _ => 'Auto',
+};
+String _vehicleImage(String value) => switch (value) {
+  'TEMPO_TRAVELLER' => 'assets/images/popup-tempo-traveller.png',
+  'HATCHBACK' => 'assets/images/popup-car.png',
+  'SEDAN' => 'assets/images/ride-sedan.png',
+  'SUV' => 'assets/images/ride-suv.png',
+  _ => 'assets/images/schedule-auto.png',
+};
+int _vehicleSeats(String value) => switch (value) {
+  'TEMPO_TRAVELLER' => 12,
+  'SUV' => 6,
+  'AUTO' => 3,
+  _ => 4,
+};
+String _serviceLabel(Map<String, dynamic> booking) {
+  final package = booking['packageName']?.toString();
+  if (package != null && package.isNotEmpty) return package;
+  return switch (booking['serviceType']) {
+    'TOUR_PACKAGE' => 'Tour Package',
+    'RENTAL_PACKAGE' => 'Rental Package',
+    'CITY_ROUND_TRIP' => 'City Round Trip',
+    'SCHEDULED_RIDE' => 'Scheduled Ride',
+    _ =>
+      '${_vehicleLabel(booking['vehicleVariant']?.toString() ?? 'AUTO')} Ride',
+  };
+}
+
+String _formatDate(dynamic value) {
+  final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+  if (date == null) return '--';
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+String _formatTime(dynamic value) {
+  final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+  if (date == null) return '--';
+  final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+  return '${hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} ${date.hour >= 12 ? 'PM' : 'AM'}';
+}
+
+String _money(dynamic value) => '₹${(value as num? ?? 0).round()}';
+
+String _address(dynamic place, {String fallback = 'Location unavailable'}) {
+  if (place is Map) return place['address']?.toString() ?? fallback;
+  return fallback;
+}
+
+String _statusLabel(dynamic value) => switch (value?.toString()) {
+  'SEARCHING_DRIVER' => 'Searching for driver',
+  'DRIVER_ACCEPTED' => 'Driver accepted',
+  'AWAITING_PAYMENT' => 'Payment pending',
+  'PAYMENT_CONFIRMED' => 'Payment confirmed',
+  'ASSIGNMENT_PENDING' => 'Assignment pending',
+  'ASSIGNED' => 'Driver assigned',
+  'DRIVER_EN_ROUTE' => 'Driver on the way',
+  'ARRIVED' => 'Driver arrived',
+  'IN_PROGRESS' => 'Trip in progress',
+  'NO_DRIVER_AVAILABLE' => 'No driver available',
+  'CANCELLED' => 'Cancelled',
+  'NO_SHOW' => 'No show',
+  'COMPLETED' => 'Completed',
+  _ => 'Booking confirmed',
+};
+
+String _tripDetails(Map<String, dynamic> booking) {
+  final parts = <String>[];
+  final duration = booking['durationMinutes'] as num?;
+  final distance = booking['estimatedDistanceKm'] as num?;
+  if (duration != null) parts.add('${duration.round()} mins');
+  if (distance != null) {
+    parts.add('${distance.toStringAsFixed(distance % 1 == 0 ? 0 : 1)} KM');
+  }
+  return parts.isEmpty ? 'Trip details' : parts.join('   •   ');
+}
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -14,8 +113,105 @@ class BookingsScreen extends StatefulWidget {
   State<BookingsScreen> createState() => _BookingsScreenState();
 }
 
-class _BookingsScreenState extends State<BookingsScreen> {
+class _BookingsScreenState extends State<BookingsScreen>
+    with WidgetsBindingObserver {
   _TripFilter _filter = _TripFilter.all;
+  List<Map<String, dynamic>> _bookings = const [];
+  bool _loading = true;
+  String _error = '';
+  Timer? _refreshTimer;
+
+  static const _terminalStatuses = {
+    'COMPLETED',
+    'CANCELLED',
+    'NO_SHOW',
+    'NO_DRIVER_AVAILABLE',
+  };
+
+  List<Map<String, dynamic>> get _liveTrips => _bookings
+      .where(
+        (booking) =>
+            !_terminalStatuses.contains(booking['status']) &&
+            booking['timing'] != 'SCHEDULED',
+      )
+      .toList();
+  List<Map<String, dynamic>> get _upcomingTrips => _bookings
+      .where(
+        (booking) =>
+            !_terminalStatuses.contains(booking['status']) &&
+            booking['timing'] == 'SCHEDULED',
+      )
+      .toList();
+  List<Map<String, dynamic>> get _completedTrips => _bookings
+      .where((booking) => _terminalStatuses.contains(booking['status']))
+      .toList();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadBookings());
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => unawaited(_loadBookings(silent: true)),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadBookings(silent: true));
+    }
+  }
+
+  Future<void> _loadBookings({bool silent = false}) async {
+    if (!silent && mounted) setState(() => _loading = true);
+    try {
+      final bookings = await CustomerBookingService.list();
+      if (mounted) {
+        setState(() {
+          _bookings = bookings;
+          _error = '';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = error.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  bool get _visibleTripsEmpty =>
+      (!_showLive || _liveTrips.isEmpty) &&
+      (!_showUpcoming || _upcomingTrips.isEmpty) &&
+      (!_showCompleted || _completedTrips.isEmpty);
+
+  void _openLiveTrip(Map<String, dynamic> booking) {
+    final variant = booking['vehicleVariant']?.toString() ?? 'AUTO';
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => DriverSearchScreen(
+              booking: booking,
+              vehicleName: _vehicleLabel(variant),
+              vehicleImage: _vehicleImage(variant),
+              seats: '${booking['passengerCount'] ?? _vehicleSeats(variant)}',
+            ),
+          ),
+        )
+        .then((_) => _loadBookings(silent: true));
+  }
 
   bool get _showLive =>
       _filter == _TripFilter.all || _filter == _TripFilter.live;
@@ -56,15 +252,34 @@ class _BookingsScreenState extends State<BookingsScreen> {
                   ),
                   const SizedBox(height: 10),
                 ],
-                if (_showLive) ...[
-                  const _LiveTrips(),
-                  const SizedBox(height: 10),
+                if (_loading) ...[
+                  const _BookingsLoading(),
+                ] else if (_error.isNotEmpty) ...[
+                  _BookingsMessage(
+                    message: _error,
+                    onRetry: () => unawaited(_loadBookings()),
+                  ),
+                ] else if (_bookings.isEmpty) ...[
+                  const _BookingsMessage(message: 'You have no bookings yet.'),
+                ] else ...[
+                  if (_showLive && _liveTrips.isNotEmpty) ...[
+                    _DynamicLiveTrips(
+                      bookings: _liveTrips,
+                      onOpen: _openLiveTrip,
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (_showUpcoming && _upcomingTrips.isNotEmpty) ...[
+                    _DynamicUpcomingTrips(bookings: _upcomingTrips),
+                    const SizedBox(height: 10),
+                  ],
+                  if (_showCompleted && _completedTrips.isNotEmpty)
+                    _DynamicCompletedTrips(bookings: _completedTrips),
+                  if (_visibleTripsEmpty)
+                    const _BookingsMessage(
+                      message: 'No bookings found for this filter.',
+                    ),
                 ],
-                if (_showUpcoming) ...[
-                  const _UpcomingTrips(),
-                  const SizedBox(height: 10),
-                ],
-                if (_showCompleted) const _CompletedTrips(),
               ],
             ),
           ),
@@ -296,6 +511,210 @@ class _FilterTile extends StatelessWidget {
   );
 }
 
+class _DynamicLiveTrips extends StatelessWidget {
+  const _DynamicLiveTrips({required this.bookings, required this.onOpen});
+  final List<Map<String, dynamic>> bookings;
+  final ValueChanged<Map<String, dynamic>> onOpen;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          icon: Icons.near_me_outlined,
+          color: const Color(0xFF18A33B),
+          title: 'Live Trips',
+          count: '${bookings.length} Active',
+        ),
+        const SizedBox(height: 11),
+        for (var index = 0; index < bookings.length; index++) ...[
+          _DynamicLiveTripCard(
+            booking: bookings[index],
+            onTap: () => onOpen(bookings[index]),
+          ),
+          if (index != bookings.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    ),
+  );
+}
+
+class _DynamicLiveTripCard extends StatelessWidget {
+  const _DynamicLiveTripCard({required this.booking, required this.onTap});
+  final Map<String, dynamic> booking;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final driver = booking['driver'] is Map
+        ? booking['driver'] as Map
+        : const {};
+    final vehicle = driver['vehicle'] is Map
+        ? driver['vehicle'] as Map
+        : const {};
+    final variant = booking['vehicleVariant']?.toString() ?? 'AUTO';
+    final minutes = (booking['durationMinutes'] as num?)?.round();
+    return Container(
+      height: 164,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5FFF7),
+        border: Border.all(color: const Color(0xFFCFEBD5)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Badge(
+                  _statusLabel(booking['status']).toUpperCase(),
+                  color: const Color(0xFF159D38),
+                  background: const Color(0xFFE0F7E5),
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  _serviceLabel(booking),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _RoutePoint(
+                  color: const Color(0xFF16A33B),
+                  text: _address(booking['pickup']),
+                ),
+                const SizedBox(height: 7),
+                _RoutePoint(
+                  color: Colors.red,
+                  text: _address(
+                    booking['destination'],
+                    fallback: 'Destination unavailable',
+                  ),
+                ),
+                const Spacer(),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.directions_car_outlined,
+                      color: AppColors.navy,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '${_vehicleLabel(variant)}  •  ${vehicle['registrationNumber'] ?? 'Driver pending'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.navy,
+                          fontSize: 8.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (driver['name'] != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    driver['name'].toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 8.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            width: 126,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: const Color(0xFFDCE7DF)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 58,
+                  width: double.infinity,
+                  child: Image.asset(
+                    'assets/images/home-map-placeholder.png',
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(9, 6, 9, 2),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Trip status',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 8.5,
+                          ),
+                        ),
+                        Text(
+                          minutes == null
+                              ? _statusLabel(booking['status'])
+                              : '$minutes mins',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF16A33B),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 28,
+                    child: TextButton(
+                      onPressed: onTap,
+                      style: TextButton.styleFrom(
+                        backgroundColor: const Color(0xFFE6F8E9),
+                        foregroundColor: const Color(0xFF159D38),
+                        textStyle: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      child: const Text('Track Live  ›'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Kept as the original visual reference while the live card uses API data.
+// ignore: unused_element
 class _LiveTrips extends StatelessWidget {
   const _LiveTrips();
   @override
@@ -457,6 +876,49 @@ class _LiveTrips extends StatelessWidget {
   );
 }
 
+class _DynamicUpcomingTrips extends StatelessWidget {
+  const _DynamicUpcomingTrips({required this.bookings});
+  final List<Map<String, dynamic>> bookings;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          icon: Icons.calendar_month_outlined,
+          color: AppColors.blue,
+          title: 'Upcoming Trips',
+          count:
+              '${bookings.length} ${bookings.length == 1 ? 'Trip' : 'Trips'}',
+        ),
+        const SizedBox(height: 10),
+        for (var index = 0; index < bookings.length; index++) ...[
+          _TripCard(
+            image: _vehicleImage(
+              bookings[index]['vehicleVariant']?.toString() ?? 'AUTO',
+            ),
+            badge: _serviceLabel(bookings[index]),
+            title: _serviceLabel(bookings[index]),
+            from: _address(bookings[index]['pickup']),
+            to: _address(bookings[index]['destination']),
+            date: _formatDate(bookings[index]['scheduledStartAt']),
+            time: _formatTime(bookings[index]['scheduledStartAt']),
+            people: '${bookings[index]['passengerCount'] ?? 1} People',
+            vehicle: _vehicleLabel(
+              bookings[index]['vehicleVariant']?.toString() ?? 'AUTO',
+            ),
+            details: _tripDetails(bookings[index]),
+            price: _money(bookings[index]['amount']),
+          ),
+          if (index != bookings.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    ),
+  );
+}
+
+// ignore: unused_element
 class _UpcomingTrips extends StatelessWidget {
   const _UpcomingTrips();
   @override
@@ -503,6 +965,152 @@ class _UpcomingTrips extends StatelessWidget {
   );
 }
 
+class _DynamicCompletedTrips extends StatelessWidget {
+  const _DynamicCompletedTrips({required this.bookings});
+  final List<Map<String, dynamic>> bookings;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          icon: Icons.check_circle_outline_rounded,
+          color: const Color(0xFF9747E5),
+          title: 'Completed Trips',
+          count:
+              '${bookings.length} ${bookings.length == 1 ? 'Trip' : 'Trips'}',
+        ),
+        const SizedBox(height: 10),
+        for (var index = 0; index < bookings.length; index++) ...[
+          _DynamicCompactTrip(booking: bookings[index]),
+          if (index != bookings.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    ),
+  );
+}
+
+class _DynamicCompactTrip extends StatelessWidget {
+  const _DynamicCompactTrip({required this.booking});
+  final Map<String, dynamic> booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = booking['status']?.toString() ?? 'COMPLETED';
+    final cancelled =
+        status == 'CANCELLED' ||
+        status == 'NO_SHOW' ||
+        status == 'NO_DRIVER_AVAILABLE';
+    final statusColor = cancelled ? Colors.red : const Color(0xFF168C35);
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE0E5ED)),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(7),
+            child: Image.asset(
+              _vehicleImage(booking['vehicleVariant']?.toString() ?? 'AUTO'),
+              width: 68,
+              height: 68,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Badge(_serviceLabel(booking)),
+                const SizedBox(height: 5),
+                Text(
+                  _serviceLabel(booking),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                _RoutePoint(
+                  color: const Color(0xFF16A33B),
+                  text: _address(booking['pickup']),
+                ),
+                const SizedBox(height: 4),
+                _RoutePoint(
+                  color: Colors.red,
+                  text: _address(booking['destination']),
+                ),
+              ],
+            ),
+          ),
+          Container(width: 1, height: 51, color: const Color(0xFFE2E6ED)),
+          const SizedBox(width: 7),
+          SizedBox(
+            width: 82,
+            child: Column(
+              children: [
+                _Meta(
+                  Icons.calendar_month_outlined,
+                  _formatDate(booking['scheduledStartAt']),
+                ),
+                const SizedBox(height: 6),
+                _Meta(
+                  Icons.schedule_outlined,
+                  _formatTime(booking['scheduledStartAt']),
+                ),
+                const SizedBox(height: 6),
+                _Meta(
+                  Icons.person_outline_rounded,
+                  '${booking['passengerCount'] ?? 1} People',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 5),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _money(booking['amount']),
+                style: const TextStyle(
+                  color: AppColors.blue,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: .1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _statusLabel(status),
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 7.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _CompletedTrips extends StatelessWidget {
   const _CompletedTrips();
   @override
@@ -900,5 +1508,58 @@ class _Panel extends StatelessWidget {
       ],
     ),
     child: child,
+  );
+}
+
+class _BookingsLoading extends StatelessWidget {
+  const _BookingsLoading();
+
+  @override
+  Widget build(BuildContext context) => const _Panel(
+    child: SizedBox(
+      height: 150,
+      child: Center(
+        child: CircularProgressIndicator(
+          color: AppColors.blue,
+          strokeWidth: 2.5,
+        ),
+      ),
+    ),
+  );
+}
+
+class _BookingsMessage extends StatelessWidget {
+  const _BookingsMessage({required this.message, this.onRetry});
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 34),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.calendar_month_outlined,
+            color: AppColors.blue,
+            size: 38,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(height: 12),
+            TextButton(onPressed: onRetry, child: const Text('Try Again')),
+          ],
+        ],
+      ),
+    ),
   );
 }
