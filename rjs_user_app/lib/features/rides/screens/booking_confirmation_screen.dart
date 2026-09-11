@@ -11,18 +11,30 @@ class BookingConfirmationScreen extends StatefulWidget {
     required this.destination,
     required this.vehicleName,
     required this.vehicleVariant,
+    required this.categoryId,
+    required this.variantId,
     required this.vehicleImage,
     required this.seats,
     required this.amount,
+    required this.pickupLatitude,
+    required this.pickupLongitude,
+    required this.destinationLatitude,
+    required this.destinationLongitude,
   });
 
   final String pickup;
   final String destination;
   final String vehicleName;
   final String vehicleVariant;
+  final String categoryId;
+  final String variantId;
   final String vehicleImage;
   final String seats;
   final int amount;
+  final double pickupLatitude;
+  final double pickupLongitude;
+  final double destinationLatitude;
+  final double destinationLongitude;
 
   @override
   State<BookingConfirmationScreen> createState() =>
@@ -48,7 +60,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> {
       final booking = await CustomerBookingService.create(
         pickupAddress: widget.pickup,
         destinationAddress: widget.destination,
-        vehicleVariant: widget.vehicleVariant,
+        pickupLatitude: widget.pickupLatitude,
+        pickupLongitude: widget.pickupLongitude,
+        destinationLatitude: widget.destinationLatitude,
+        destinationLongitude: widget.destinationLongitude,
+        categoryId: widget.categoryId,
+        variantId: widget.variantId,
         paymentMethod: _paymentMethod,
       );
       if (!mounted) return;
@@ -529,7 +546,9 @@ class _FareCard extends StatelessWidget {
         const SizedBox(height: 14),
         _FareRow(label: 'Estimated ride fare', value: '₹$amount'),
         const SizedBox(height: 9),
-        const _FareRow(label: 'Taxes and platform charges', value: 'Included'),
+        const _FareRow(label: 'GST', value: 'Included'),
+        const SizedBox(height: 9),
+        const _FareRow(label: 'Platform/convenience fee', value: '₹0'),
         const Divider(height: 25),
         _FareRow(
           label: 'Total estimated fare',

@@ -3,7 +3,7 @@ import { LuCalendarClock, LuCarFront, LuChevronLeft, LuChevronRight, LuCircleChe
 import AdminLayout from "../components/AdminLayout.jsx";
 import { get, post } from "../services/api.js";
 
-const types = { IMMEDIATE_RIDE: "Nearby ride", SCHEDULED_RIDE: "Scheduled ride", CITY_ROUND_TRIP: "City round trip", RENTAL_PACKAGE: "Rental package", TOUR_PACKAGE: "Tour package" };
+const types = { IMMEDIATE_RIDE: "Nearby ride", SCHEDULED_RIDE: "Scheduled ride", CITY_ROUND_TRIP: "City round trip", RENTAL_PACKAGE: "Rental package", TOUR_PACKAGE: "Tour package", CUSTOM_TRIP: "Custom trip" };
 const statusTone = { NEW: "bg-slate-100 text-slate-600", PAYMENT_CONFIRMED: "bg-blue-50 text-blue-600", ASSIGNMENT_PENDING: "bg-orange-50 text-orange-600", ASSIGNED: "bg-violet-50 text-violet-600", DRIVER_EN_ROUTE: "bg-cyan-50 text-cyan-700", ARRIVED: "bg-cyan-50 text-cyan-700", IN_PROGRESS: "bg-emerald-50 text-emerald-700", COMPLETED: "bg-green-50 text-green-700", CANCELLED: "bg-red-50 text-red-600", NO_DRIVER_AVAILABLE: "bg-red-50 text-red-600", NO_SHOW: "bg-amber-50 text-amber-700" };
 const formatDate = (value) => value ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
 const money = (value) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value || 0);

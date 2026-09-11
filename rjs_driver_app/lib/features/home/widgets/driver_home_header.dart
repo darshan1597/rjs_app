@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/driver_api_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/notification_popup.dart';
 
 class DriverHomeHeader extends StatelessWidget {
-  const DriverHomeHeader({required this.isOnline, super.key});
+  const DriverHomeHeader({required this.isOnline, this.driver, super.key});
 
   final bool isOnline;
+  final Map<String, dynamic>? driver;
 
   String get _greeting {
     final hour = DateTime.now().hour;
@@ -64,12 +66,7 @@ class DriverHomeHeader extends StatelessWidget {
                         color: AppColors.green,
                         shape: BoxShape.circle,
                       ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/driver-ramesh.png',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                      child: ClipOval(child: _driverPhoto()),
                     ),
                     Positioned(
                       right: 2,
@@ -103,9 +100,9 @@ class DriverHomeHeader extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text(
-                        'Ramesh 👋',
-                        style: TextStyle(
+                      Text(
+                        '${_driverName()} 👋',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -166,6 +163,26 @@ class DriverHomeHeader extends StatelessWidget {
       ],
     ),
   );
+
+  String _driverName() {
+    final name = driver?['name']?.toString().trim() ?? '';
+    return name.isEmpty ? 'Driver' : name;
+  }
+
+  Widget _driverPhoto() {
+    final source = DriverApiService.absoluteUrl(
+      driver?['profilePhoto']?.toString(),
+    );
+    if (source.isEmpty) {
+      return Image.asset('assets/images/driver-ramesh.png', fit: BoxFit.cover);
+    }
+    return Image.network(
+      source,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          Image.asset('assets/images/driver-ramesh.png', fit: BoxFit.cover),
+    );
+  }
 }
 
 class _HeaderIcon extends StatelessWidget {

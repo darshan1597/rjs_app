@@ -3,12 +3,16 @@ import 'package:flutter/material.dart';
 import '../../../core/network/customer_auth_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../location/screens/location_search_screen.dart';
+import '../../location/models/map_place.dart';
+import '../../location/services/maps_service.dart';
 import '../../rides/screens/choose_ride_screen.dart';
 import '../../saved_places/screens/saved_places_screen.dart';
 import '../../saved_places/services/saved_places_service.dart';
 
 class LocationCard extends StatefulWidget {
-  const LocationCard({super.key});
+  const LocationCard({super.key, this.onPullDown});
+
+  final Future<void> Function()? onPullDown;
 
   @override
   State<LocationCard> createState() => _LocationCardState();
@@ -16,7 +20,11 @@ class LocationCard extends StatefulWidget {
 
 class _LocationCardState extends State<LocationCard> {
   late Future<List<Map<String, dynamic>>> _placesFuture;
-  String? _destination;
+  MapPlace? _destination;
+  MapPlace? _pickup;
+  bool _openingDestination = false;
+  double _pullDistance = 0;
+  bool _draggingMap = false;
 
   @override
   void initState() {
@@ -32,28 +40,71 @@ class _LocationCardState extends State<LocationCard> {
   }
 
   Future<void> _chooseDestination() async {
-    final selected = await Navigator.push<String>(
+    if (_openingDestination) return;
+    final pickupFuture = _pickup == null
+        ? MapsService.currentPlace()
+        : Future<MapPlace>.value(_pickup!);
+    final selected = await Navigator.push<MapPlace>(
       context,
       MaterialPageRoute(
-        builder: (_) => LocationSearchScreen(initialValue: _destination),
+        builder: (_) =>
+            LocationSearchScreen(initialValue: _destination?.address),
       ),
     );
-    if (selected != null && selected.trim().isNotEmpty && mounted) {
-      setState(() => _destination = selected.trim());
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChooseRideScreen(
-            pickup: 'Current Location',
-            destination: selected.trim(),
+    if (selected == null) {
+      try {
+        _pickup = await pickupFuture;
+      } catch (_) {}
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _destination = selected;
+        _openingDestination = true;
+      });
+      try {
+        _pickup = await pickupFuture;
+        if (!mounted) return;
+        setState(() => _openingDestination = false);
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                ChooseRideScreen(pickup: _pickup!, destination: selected),
           ),
-        ),
-      );
+        );
+      } catch (error) {
+        if (mounted) {
+          setState(() => _openingDestination = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error.toString().replaceFirst('Exception: ', '')),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
     }
   }
 
+  Future<void> _finishMapPull(DragEndDetails details) async {
+    final shouldOpen =
+        _pullDistance >= 28 || (details.primaryVelocity ?? 0) > 180;
+    setState(() {
+      _draggingMap = false;
+      _pullDistance = shouldOpen ? 54 : 0;
+    });
+    if (!shouldOpen) return;
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    await widget.onPullDown?.call();
+    if (mounted) setState(() => _pullDistance = 0);
+  }
+
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: _draggingMap ? Duration.zero : const Duration(milliseconds: 240),
+    curve: Curves.easeOutCubic,
+    transform: Matrix4.translationValues(0, _pullDistance * .32, 0),
     padding: const EdgeInsets.fromLTRB(15, 13, 15, 13),
     decoration: BoxDecoration(
       color: Colors.white,
@@ -70,16 +121,38 @@ class _LocationCardState extends State<LocationCard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Center(
-          child: Container(
-            width: 42,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFFCBD2DE),
-              borderRadius: BorderRadius.circular(20),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) => setState(() {
+              _draggingMap = true;
+              _pullDistance = 0;
+            }),
+            onVerticalDragUpdate: (details) {
+              setState(() {
+                _pullDistance = (_pullDistance + details.delta.dy)
+                    .clamp(0, 110)
+                    .toDouble();
+              });
+            },
+            onVerticalDragCancel: () => setState(() {
+              _draggingMap = false;
+              _pullDistance = 0;
+            }),
+            onVerticalDragEnd: _finishMapPull,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(36, 2, 36, 8),
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD2DE),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
         FutureBuilder<Map<String, dynamic>?>(
           future: CustomerAuthService.getCachedCustomer(),
           builder: (context, snapshot) => Text(
@@ -104,11 +177,15 @@ class _LocationCardState extends State<LocationCard> {
         _field(
           Icons.location_on_rounded,
           AppColors.orange,
-          _destination ?? 'Enter your destination',
+          _destination?.address ?? 'Enter your destination',
           _destination == null ? const Color(0xFF9BA1AF) : AppColors.navy,
-          Icons.arrow_forward_rounded,
+          _openingDestination ? null : Icons.arrow_forward_rounded,
           onTap: _chooseDestination,
         ),
+        if (_openingDestination) ...[
+          const SizedBox(height: 5),
+          const LinearProgressIndicator(color: AppColors.orange, minHeight: 2),
+        ],
         const SizedBox(height: 13),
         FutureBuilder<List<Map<String, dynamic>>>(
           future: _placesFuture,

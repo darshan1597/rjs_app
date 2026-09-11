@@ -6,6 +6,17 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../services/customer_booking_service.dart';
 
+Widget _vehicleImage(String source) => source.startsWith('http')
+    ? Image.network(
+        source,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Icon(
+          Icons.directions_car_rounded,
+          color: AppColors.muted,
+        ),
+      )
+    : Image.asset(source, fit: BoxFit.contain);
+
 class DriverSearchScreen extends StatefulWidget {
   const DriverSearchScreen({
     super.key,
@@ -54,6 +65,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
             if (status == AnimationStatus.completed && mounted && !_accepted) {
               _messageTimer?.cancel();
               setState(() => _timedOut = true);
+              unawaited(_refresh());
             }
           });
     _searchProgress.forward();
@@ -115,13 +127,13 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
         }.contains(status);
         setState(() {
           _booking = booking;
-          if (accepted) _timedOut = false;
+          _timedOut = status == 'NO_DRIVER_AVAILABLE';
         });
         if (accepted) {
           _searchProgress.stop();
           _messageTimer?.cancel();
         }
-        if (const {'COMPLETED', 'CANCELLED'}.contains(status)) {
+        if (const {'COMPLETED', 'CANCELLED', 'NO_DRIVER_AVAILABLE'}.contains(status)) {
           _poller?.cancel();
         }
       }
@@ -132,11 +144,22 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     }
   }
 
-  void _retry() {
-    setState(() {
-      _timedOut = false;
-      _messageIndex = 0;
-    });
+  Future<void> _retry() async {
+    try {
+      final booking = await CustomerBookingService.retrySearch(_bookingId);
+      if (!mounted) return;
+      setState(() {
+        _booking = booking;
+        _timedOut = false;
+        _messageIndex = 0;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+      return;
+    }
     _searchProgress
       ..reset()
       ..forward();
@@ -148,7 +171,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     });
     _poller?.cancel();
     _poller = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
-    _refresh();
+    unawaited(_refresh());
   }
 
   Future<void> _cancel() async {
@@ -232,6 +255,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     'ARRIVED' => 'Your driver has arrived at the pickup.',
     'IN_PROGRESS' => 'Trip in progress. Have a safe journey!',
     'COMPLETED' => 'You have reached your destination.',
+    'NO_DRIVER_AVAILABLE' => 'No driver accepted the ride in time.',
     _ => _timedOut
         ? 'No driver accepted the ride in time.'
         : _messages[_messageIndex],
@@ -359,10 +383,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                                           shape: BoxShape.circle,
                                         ),
                                         padding: const EdgeInsets.all(8),
-                                        child: Image.asset(
-                                          widget.vehicleImage,
-                                          fit: BoxFit.contain,
-                                        ),
+                                        child: _vehicleImage(widget.vehicleImage),
                                       ),
                                     ),
                                   ),
@@ -685,7 +706,7 @@ class _SearchPanel extends StatelessWidget {
               SizedBox(
                 width: 95,
                 height: 58,
-                child: Image.asset(vehicleImage, fit: BoxFit.contain),
+                child: _vehicleImage(vehicleImage),
               ),
               const SizedBox(width: 10),
               Expanded(

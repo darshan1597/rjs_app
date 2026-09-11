@@ -10,6 +10,7 @@ import {
   LuPackageOpen,
   LuSettings,
   LuLifeBuoy,
+  LuClipboardPenLine,
   LuUsers,
   LuWalletCards,
 } from "react-icons/lu";
@@ -25,7 +26,9 @@ const superLinks = [
 const employeeLinks = [
   ["/", LuLayoutDashboard, "Dashboard"],
   ["/drivers", LuCarFront, "Drivers"],
+  ["/vehicles", LuCarFront, "Vehicles"],
   ["/bookings", LuCalendarDays, "Bookings"],
+  ["/custom-enquiries", LuClipboardPenLine, "Custom enquiries"],
   ["/tour-packages", LuPackageOpen, "Tour packages"],
   ["/payments", LuWalletCards, "Payments"],
   ["/support-tickets", LuLifeBuoy, "Support tickets"],

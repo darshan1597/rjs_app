@@ -6,6 +6,7 @@ async function connectDatabase() {
   await mongoose.connect(env.MONGODB_URL, {
     serverSelectionTimeoutMS: 10000,
   });
+  console.log("MongoDB Connected")
 }
 
 async function disconnectDatabase() {

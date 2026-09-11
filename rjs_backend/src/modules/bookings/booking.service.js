@@ -19,7 +19,14 @@ async function eligibleDrivers(bookingId) {
   const booking = await Booking.findById(bookingId).lean();
   if (!booking) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking was not found');
   const busyIds = await Booking.distinct('currentDriverId', { _id: { $ne: booking._id }, currentDriverId: { $ne: null }, status: { $nin: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] }, scheduledStartAt: { $lt: booking.scheduledEndAt }, scheduledEndAt: { $gt: booking.scheduledStartAt } });
-  const drivers = await Driver.find({ _id: { $nin: busyIds }, status: 'ACTIVE', 'vehicle.category': booking.requestedVehicleType, 'vehicle.seatingCapacity': { $gte: booking.passengerCount }, 'licence.expiryDate': { $gte: booking.scheduledEndAt } }).select('driverCode personal.fullName personal.phone vehicle licence.expiryDate').lean();
+  const vehicleMatch = booking.vehicleCategoryId
+    ? { 'vehicle.categoryId': booking.vehicleCategoryId, ...(booking.vehicleVariantId ? { 'vehicle.variantId': booking.vehicleVariantId } : {}) }
+    : { 'vehicle.category': booking.requestedVehicleType };
+  const localService = ['IMMEDIATE_RIDE', 'SCHEDULED_RIDE', 'CITY_ROUND_TRIP'].includes(booking.serviceType);
+  const serviceMatch = {
+    serviceAssignment: { $in: localService ? ['LOCAL', 'FLEXIBLE', null] : ['OUTSTATION', 'FLEXIBLE', null] },
+  };
+  const drivers = await Driver.find({ _id: { $nin: busyIds }, status: 'ACTIVE', ...serviceMatch, ...vehicleMatch, 'vehicle.seatingCapacity': { $gte: booking.passengerCount }, 'licence.expiryDate': { $gte: booking.scheduledEndAt } }).select('driverCode personal.fullName personal.phone serviceAssignment vehicle licence.expiryDate').lean();
   return { booking, drivers };
 }
 async function assignDriver(bookingId, driverId, employeeId, reason) {

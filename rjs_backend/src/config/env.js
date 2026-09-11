@@ -15,6 +15,8 @@ const schema = z.object({
     try { return Buffer.from(value, 'base64').length === 32; } catch (_) { return false; }
   }, 'MFA_ENCRYPTION_KEY must be exactly 32 random bytes encoded as base64'),
   DEV_FIXED_OTP: z.string().regex(/^\d{6}$/).default('123456'),
+  LOCAL_RIDE_GST_PERCENT: z.coerce.number().min(0).max(100).default(5),
+  GOOGLE_MAPS_SERVER_API_KEY: z.string().min(1).optional(),
   CLIENT_ORIGINS: z.string().default('http://localhost:3000'),
   SUPER_ADMIN_NAME: z.string().min(2).optional(),
   SUPER_ADMIN_EMAIL: z.string().email().optional(),

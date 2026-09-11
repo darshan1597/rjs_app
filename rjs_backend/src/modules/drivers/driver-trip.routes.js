@@ -7,6 +7,9 @@ import { Booking } from '../bookings/booking.model.js';
 import { authenticateDriver } from './driver-auth.middleware.js';
 
 const router = express.Router();
+const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.variantId
+  ? { vehicleCategoryId: driver.vehicle.categoryId, vehicleVariantId: driver.vehicle.variantId, serviceType: 'IMMEDIATE_RIDE' }
+  : { requestedVehicleType: driver.vehicle.category, serviceType: 'IMMEDIATE_RIDE' };
 const empty = z.object({});
 const id = z.string().regex(/^[a-f\d]{24}$/i);
 const idSchema = z.object({ body: empty, params: z.object({ bookingId: id }), query: empty });
@@ -62,9 +65,30 @@ router.get('/offers', async (req, res, next) => {
     if (req.driver.operationalStatus !== 'ONLINE') {
       return res.json({ success: true, data: { offers: [] } });
     }
+    if (!['LOCAL', 'FLEXIBLE'].includes(req.driver.serviceAssignment)) {
+      return res.json({ success: true, data: { offers: [] } });
+    }
+    const now = new Date();
+    await Booking.updateMany(
+      {
+        status: 'SEARCHING_DRIVER',
+        assignmentDeadline: { $lte: now },
+        currentDriverId: null,
+      },
+      {
+        $set: { status: 'NO_DRIVER_AVAILABLE' },
+        $push: {
+          statusHistory: {
+            status: 'NO_DRIVER_AVAILABLE',
+            note: 'No matching driver accepted within the search window',
+          },
+        },
+      },
+    );
     const bookings = await Booking.find({
       status: 'SEARCHING_DRIVER',
-      requestedVehicleType: req.driver.vehicle.category,
+      assignmentDeadline: { $gt: now },
+      ...vehicleMatch(req.driver),
       currentDriverId: null,
       rejectedDriverIds: { $ne: req.driver._id },
     }).sort({ createdAt: 1 }).limit(10);
@@ -85,11 +109,13 @@ router.get('/active', async (req, res, next) => {
 router.post('/:bookingId/accept', validate(idSchema), async (req, res, next) => {
   try {
     if (req.driver.operationalStatus !== 'ONLINE') throw new AppError(409, 'DRIVER_OFFLINE', 'Go online before accepting rides');
+    if (!['LOCAL', 'FLEXIBLE'].includes(req.driver.serviceAssignment)) throw new AppError(403, 'DRIVER_NOT_ELIGIBLE', 'This driver is not assigned to local rides');
     const booking = await Booking.findOneAndUpdate(
       {
         _id: req.validated.params.bookingId,
         status: 'SEARCHING_DRIVER',
-        requestedVehicleType: req.driver.vehicle.category,
+        assignmentDeadline: { $gt: new Date() },
+        ...vehicleMatch(req.driver),
         currentDriverId: null,
         rejectedDriverIds: { $ne: req.driver._id },
       },

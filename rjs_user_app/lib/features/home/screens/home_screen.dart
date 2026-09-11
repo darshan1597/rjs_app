@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 import '../../city_round_trip/screens/city_round_trip_screen.dart';
+import '../../location/screens/full_map_trip_picker_screen.dart';
 import '../../rental/screens/rental_packages_screen.dart';
 import '../../schedule/screens/schedule_ride_screen.dart';
 import '../../tours/screens/tour_packages_screen.dart';
@@ -19,6 +20,78 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedNav = 0;
+  double _topPullDistance = 0;
+  bool _openingFullMap = false;
+  bool _fullMapQueued = false;
+
+  void _queueFullMap() {
+    if (_openingFullMap || _fullMapQueued) return;
+    _fullMapQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fullMapQueued = false;
+      if (mounted) _openFullMap();
+    });
+  }
+
+  bool _handleHomeScroll(ScrollNotification notification) {
+    if (_openingFullMap) return false;
+    if (notification is ScrollStartNotification) {
+      if (_topPullDistance != 0) setState(() => _topPullDistance = 0);
+    } else if (notification is ScrollUpdateNotification &&
+        notification.metrics.pixels < notification.metrics.minScrollExtent) {
+      final distance =
+          notification.metrics.minScrollExtent - notification.metrics.pixels;
+      if ((distance - _topPullDistance).abs() > .5) {
+        setState(() => _topPullDistance = distance.clamp(0, 150));
+      }
+      if (distance >= 64 && notification.dragDetails != null) {
+        _queueFullMap();
+      }
+    } else if (notification is OverscrollNotification &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        notification.overscroll < 0) {
+      setState(() {
+        _topPullDistance = (_topPullDistance - notification.overscroll).clamp(
+          0,
+          150,
+        );
+      });
+      if (_topPullDistance >= 64 && notification.dragDetails != null) {
+        _queueFullMap();
+      }
+    } else if (notification is ScrollEndNotification) {
+      if (_topPullDistance >= 54) {
+        _openFullMap();
+      } else if (_topPullDistance != 0) {
+        setState(() => _topPullDistance = 0);
+      }
+    }
+    return false;
+  }
+
+  Future<void> _openFullMap() async {
+    if (_openingFullMap) return;
+    _openingFullMap = true;
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 380),
+        reverseTransitionDuration: const Duration(milliseconds: 280),
+        pageBuilder: (_, _, _) => const FullMapTripPickerScreen(),
+        transitionsBuilder: (_, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return FadeTransition(opacity: curved, child: child);
+        },
+      ),
+    );
+    _openingFullMap = false;
+    if (mounted && _topPullDistance != 0) {
+      setState(() => _topPullDistance = 0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,29 +101,38 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         top: false,
         bottom: false,
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: MapBookingHeader(onMenuTap: () => showRjsDrawer(context)),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _handleHomeScroll,
+          child: CustomScrollView(
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 38, 16, 22),
-              sliver: SliverList.list(
-                children: [
-                  JourneyPlanner(
-                    onScheduleRide: _openScheduleRide,
-                    onCityRoundTrip: _openCityRoundTrip,
-                    onTourPackages: _openTourPackages,
-                    onRentalPackage: _openRentalPackages,
-                  ),
-                  const SizedBox(height: 10),
-                  const SafetyBanner(),
-                  SizedBox(height: 92 + MediaQuery.paddingOf(context).bottom),
-                ],
+            slivers: [
+              SliverToBoxAdapter(
+                child: MapBookingHeader(
+                  onMenuTap: () => showRjsDrawer(context),
+                  onOpenFullMap: _openFullMap,
+                  pullDistance: _topPullDistance,
+                ),
               ),
-            ),
-          ],
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 38, 16, 22),
+                sliver: SliverList.list(
+                  children: [
+                    JourneyPlanner(
+                      onScheduleRide: _openScheduleRide,
+                      onCityRoundTrip: _openCityRoundTrip,
+                      onTourPackages: _openTourPackages,
+                      onRentalPackage: _openRentalPackages,
+                    ),
+                    const SizedBox(height: 10),
+                    const SafetyBanner(),
+                    SizedBox(height: 92 + MediaQuery.paddingOf(context).bottom),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

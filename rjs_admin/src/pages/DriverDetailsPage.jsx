@@ -241,11 +241,17 @@ export default function DriverDetailsPage() {
                             </div>
                         </Panel>
                         <Panel title="Vehicle" icon={LuCarFront}>
+                            <div className="mb-4 flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
+                                <img src={driver.vehicle.variantId?.photoUrl || driver.vehicle.masterPhoto} alt={driver.vehicle.variantId?.name || "Vehicle"} className="h-20 w-36 object-contain" />
+                                <div><b className="text-base">{driver.vehicle.categoryId?.name || driver.vehicle.category?.replaceAll("_", " ")}</b><p className="text-[10px] text-slate-500">{driver.vehicle.variantId?.name || driver.vehicle.variant?.replaceAll("_", " ")}</p></div>
+                            </div>
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                 <Item
                                     label="Category"
-                                    value={driver.vehicle.category.replaceAll("_", " ")}
+                                    value={driver.vehicle.categoryId?.name || driver.vehicle.category?.replaceAll("_", " ")}
                                 />
+                                <Item label="Variant" value={driver.vehicle.variantId?.name || driver.vehicle.variant?.replaceAll("_", " ")} />
+                                <Item label="Driving assignment" value={(driver.serviceAssignment || "FLEXIBLE").replaceAll("_", " ")} />
                                 <Item
                                     label="Registration number"
                                     value={driver.vehicle.registrationNumber}
@@ -256,6 +262,8 @@ export default function DriverDetailsPage() {
                                 />
                                 <Item label="Model" value={driver.vehicle.model} />
                                 <Item label="Fuel type" value={driver.vehicle.fuelType} />
+                                <Item label="Colour" value={driver.vehicle.color || "—"} />
+                                <Item label="Ownership" value={driver.vehicle.ownershipType?.replaceAll("_", " ") || "—"} />
                                 <Item
                                     label="Seating capacity"
                                     value={driver.vehicle.seatingCapacity}

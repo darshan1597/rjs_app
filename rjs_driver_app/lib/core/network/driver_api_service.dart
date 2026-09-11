@@ -20,6 +20,10 @@ class DriverApiService {
     defaultValue: 'http://localhost:5000',
   );
   static const _sessionKey = 'driver_session';
+  static String absoluteUrl(String? path) {
+    if (path == null || path.isEmpty) return '';
+    return path.startsWith('http') ? path : '$_base$path';
+  }
   static Future<bool>? _refreshInProgress;
 
   static Map<String, dynamic> _decode(http.Response response) {
@@ -159,9 +163,15 @@ class DriverApiService {
   }
 
   static Future<bool> restoreSession() async {
-    if (await session() == null) return false;
+    final current = await session();
+    if (current == null) return false;
     try {
-      await get('driver/auth/me');
+      final data = await get('driver/auth/me');
+      final driver = data['driver'];
+      if (driver is Map<String, dynamic>) {
+        current['driver'] = driver;
+        await _saveSession(current);
+      }
       return true;
     } catch (_) {
       return false;

@@ -10,6 +10,7 @@ const date = z.coerce.date();
 const createDriverSchema = z.object({
   body: z.object({
     phoneVerificationToken: z.string().min(20),
+    serviceAssignment: z.enum(['LOCAL', 'OUTSTATION', 'FLEXIBLE']),
     personal: z.object({
       fullName: requiredText, phone: z.string().trim().min(10).max(16), dateOfBirth: date,
       gender: z.enum(['MALE', 'FEMALE', 'OTHER']), email: z.union([z.string().email(), z.literal('')]).optional(),
@@ -20,8 +21,9 @@ const createDriverSchema = z.object({
       frontFileName: fileName, backFileName: fileName, frontUrl: driverFileUrl, backUrl: driverFileUrl,
     }).refine((value) => value.expiryDate > value.issueDate, { message: 'Licence expiry must be after issue date', path: ['expiryDate'] }),
     vehicle: z.object({
-      category: z.enum(['AUTO', 'CAR', 'TEMPO_TRAVELLER', 'BUS']), registrationNumber: z.string().trim().min(5).max(20),
-      manufacturer: requiredText, model: requiredText, fuelType: requiredText,
+      categoryId: objectId, variantId: objectId, registrationNumber: z.string().trim().min(5).max(20),
+      manufacturer: requiredText, model: requiredText, fuelType: requiredText, color: requiredText,
+      ownershipType: z.enum(['RJS_OWNED', 'DRIVER_OWNED', 'THIRD_PARTY']),
       seatingCapacity: z.coerce.number().int().min(1).max(100), manufacturingYear: z.coerce.number().int().min(1990).max(new Date().getFullYear() + 1),
       frontPhoto: driverFileUrl, rearPhoto: driverFileUrl,
     }),
@@ -39,7 +41,7 @@ const listDriversSchema = z.object({
   query: z.object({
     page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().min(1).max(100).default(10),
     search: z.string().trim().max(100).optional(), status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED']).optional(),
-    vehicleType: z.enum(['AUTO', 'CAR', 'TEMPO_TRAVELLER', 'BUS']).optional(),
+    vehicleType: objectId.optional(),
   }),
 });
 

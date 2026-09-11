@@ -1,13 +1,24 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val rjsEnvironment = Properties().apply {
+    val environmentFile = rootProject.file("../.env")
+    if (environmentFile.exists()) environmentFile.inputStream().use { stream -> load(stream) }
+}
+
 android {
     namespace = "com.rjstours.customer"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    buildFeatures {
+        resValues = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -27,6 +38,15 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] =
+            rjsEnvironment.getProperty("GOOGLE_MAPS_ANDROID_API_KEY", "")
+        manifestPlaceholders["GOOGLE_MAPS_MAP_ID"] =
+            rjsEnvironment.getProperty("GOOGLE_MAPS_ANDROID_MAP_ID", "")
+        resValue(
+            "string",
+            "google_maps_map_id",
+            rjsEnvironment.getProperty("GOOGLE_MAPS_ANDROID_MAP_ID", ""),
+        )
     }
 
     buildTypes {

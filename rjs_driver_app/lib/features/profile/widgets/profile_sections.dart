@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/driver_api_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../support/screens/contact_support_screen.dart';
 
@@ -10,7 +11,9 @@ const _sectionTitle = TextStyle(
 );
 
 class DriverIdentityCard extends StatelessWidget {
-  const DriverIdentityCard({super.key});
+  const DriverIdentityCard({this.driver, super.key});
+
+  final Map<String, dynamic>? driver;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -28,14 +31,7 @@ class DriverIdentityCard extends StatelessWidget {
                   color: AppColors.green,
                   shape: BoxShape.circle,
                 ),
-                child: ClipOval(
-                  child: Image.asset(
-                    'assets/images/driver-ramesh.png',
-                    width: 86,
-                    height: 86,
-                    fit: BoxFit.cover,
-                  ),
-                ),
+                child: ClipOval(child: _driverPhoto(driver?['profilePhoto'])),
               ),
               Positioned(
                 right: -1,
@@ -54,22 +50,25 @@ class DriverIdentityCard extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 14),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Text(
-                    'Ramesh',
-                    style: TextStyle(
-                      color: AppColors.navy,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
+                  Flexible(
+                    child: Text(
+                      _displayVehicle(driver?['name'], 'Driver'),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  SizedBox(width: 8),
-                  Flexible(child: _VerifiedChip()),
+                  const SizedBox(width: 8),
+                  const Flexible(child: _VerifiedChip()),
                 ],
               ),
               SizedBox(height: 7),
@@ -84,9 +83,15 @@ class DriverIdentityCard extends StatelessWidget {
                 ],
               ),
               SizedBox(height: 7),
-              _ContactLine(Icons.phone_outlined, '+91 98765 43210'),
+              _ContactLine(
+                Icons.phone_outlined,
+                _displayVehicle(driver?['phone'], 'Phone unavailable'),
+              ),
               SizedBox(height: 6),
-              _ContactLine(Icons.mail_outline_rounded, 'ramesh.driver@rjs.com'),
+              _ContactLine(
+                Icons.mail_outline_rounded,
+                _displayVehicle(driver?['email'], 'Email not provided'),
+              ),
             ],
           ),
         ),
@@ -147,7 +152,9 @@ class _ContactLine extends StatelessWidget {
 }
 
 class DriverVehicleCard extends StatelessWidget {
-  const DriverVehicleCard({super.key});
+  const DriverVehicleCard({this.vehicle, super.key});
+
+  final Map<String, dynamic>? vehicle;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -170,52 +177,57 @@ class DriverVehicleCard extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/driver-auto-thumbnail.png',
-                  fit: BoxFit.cover,
-                ),
+                child: _vehicleImage(vehicle?['masterPhoto']),
               ),
             ),
             const SizedBox(width: 13),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'KA 05 AB 1234',
-                    style: TextStyle(
+                    _displayVehicle(vehicle?['registrationNumber'], 'Not assigned'),
+                    style: const TextStyle(
                       color: AppColors.navy,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
-                    'Bajaj RE Compact',
-                    style: TextStyle(color: AppColors.navy, fontSize: 10.5),
+                    '${_displayVehicle(vehicle?['manufacturer'], '')} ${_displayVehicle(vehicle?['model'], '')}'.trim(),
+                    style: const TextStyle(color: AppColors.navy, fontSize: 10.5),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
-                    'CNG  ·  Green & Yellow',
-                    style: TextStyle(color: AppColors.muted, fontSize: 9.5),
+                    '${_displayVehicle(vehicle?['fuelType'], 'Fuel N/A')}  •  ${_displayVehicle(vehicle?['color'], 'Color N/A')}',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 9.5),
                   ),
-                  SizedBox(height: 7),
-                  _ActiveChip(),
+                  const SizedBox(height: 7),
+                  const _ActiveChip(),
                 ],
               ),
             ),
             const SizedBox(width: 7),
-            const Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _VehicleInfo(Icons.local_taxi_outlined, 'Vehicle Type', 'Auto'),
-                SizedBox(height: 8),
-                _VehicleInfo(Icons.water_drop_outlined, 'Fuel Type', 'CNG'),
-                SizedBox(height: 8),
                 _VehicleInfo(
-                  Icons.calendar_month_outlined,
-                  'Registration Date',
-                  '12 Mar 2024',
+                  Icons.directions_car_outlined,
+                  'Vehicle Type',
+                  _displayVehicle(vehicle?['category'], 'N/A'),
+                ),
+                const SizedBox(height: 8),
+                _VehicleInfo(
+                  Icons.category_outlined,
+                  'Variant',
+                  _displayVehicle(vehicle?['variant'], 'N/A'),
+                ),
+                const SizedBox(height: 8),
+                _VehicleInfo(
+                  Icons.key_outlined,
+                  'Ownership',
+                  _ownershipLabel(vehicle?['ownershipType']),
                 ),
               ],
             ),
@@ -230,6 +242,44 @@ class DriverVehicleCard extends StatelessWidget {
     ),
   );
 }
+
+Widget _vehicleImage(Object? path) {
+  final source = DriverApiService.absoluteUrl(path?.toString());
+  if (source.isEmpty) {
+    return Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain);
+  }
+  return Image.network(
+    source,
+    fit: BoxFit.contain,
+    errorBuilder: (_, __, ___) =>
+        Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain),
+  );
+}
+
+Widget _driverPhoto(Object? path) {
+  final source = DriverApiService.absoluteUrl(path?.toString());
+  if (source.isEmpty) {
+    return Image.asset('assets/images/driver-ramesh.png', fit: BoxFit.cover);
+  }
+  return Image.network(
+    source,
+    fit: BoxFit.cover,
+    errorBuilder: (_, __, ___) =>
+        Image.asset('assets/images/driver-ramesh.png', fit: BoxFit.cover),
+  );
+}
+
+String _displayVehicle(Object? value, String fallback) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? fallback : text;
+}
+
+String _ownershipLabel(Object? value) => switch (value?.toString()) {
+  'RJS_OWNED' => 'RJS Owned',
+  'DRIVER_OWNED' => 'Driver Owned',
+  'THIRD_PARTY' => 'Third Party',
+  _ => 'N/A',
+};
 
 class _ActiveChip extends StatelessWidget {
   const _ActiveChip();
@@ -512,38 +562,48 @@ class ContactSupportCard extends StatelessWidget {
 }
 
 class LogoutCard extends StatelessWidget {
-  const LogoutCard({super.key});
+  const LogoutCard({this.onTap, super.key});
+
+  final VoidCallback? onTap;
+
   @override
-  Widget build(BuildContext context) => _Panel(
-    child: const Row(
-      children: [
-        CircleAvatar(
-          radius: 16,
-          backgroundColor: Color(0xFFFFE9EA),
-          child: Icon(Icons.logout_rounded, color: AppColors.red, size: 19),
-        ),
-        SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Logout',
-                style: TextStyle(
-                  color: AppColors.red,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                ),
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: _Panel(
+        child: const Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Color(0xFFFFE9EA),
+              child: Icon(Icons.logout_rounded, color: AppColors.red, size: 19),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Logout',
+                    style: TextStyle(
+                      color: AppColors.red,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    'Log out from your driver account',
+                    style: TextStyle(color: AppColors.muted, fontSize: 9),
+                  ),
+                ],
               ),
-              Text(
-                'Log out from your driver account',
-                style: TextStyle(color: AppColors.muted, fontSize: 9),
-              ),
-            ],
-          ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: AppColors.navy),
+          ],
         ),
-        Icon(Icons.chevron_right_rounded, color: AppColors.navy),
-      ],
+      ),
     ),
   );
 }

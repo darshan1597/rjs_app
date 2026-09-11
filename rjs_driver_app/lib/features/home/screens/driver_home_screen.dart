@@ -28,11 +28,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   bool _changingStatus = false;
   Timer? _offerTimer;
   Map<String, dynamic>? _activeTrip;
+  Map<String, dynamic>? _driver;
   bool _tripBusy = false;
 
   @override
   void initState() {
     super.initState();
+    DriverApiService.session().then((session) {
+      if (mounted) setState(() => _driver = session?['driver'] as Map<String, dynamic>?);
+    });
     _startOnlineMode();
   }
 
@@ -156,11 +160,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       return AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Enter Trip OTP', style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w900)),
-        content: TextField(controller: controller, autofocus: true, keyboardType: TextInputType.number, maxLength: 6, decoration: const InputDecoration(hintText: '6-digit OTP')),
+        title: const Text(
+          'Enter Trip OTP',
+          style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w900),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(hintText: '6-digit OTP'),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, controller.text.trim()), child: const Text('Start Trip')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Start Trip'),
+          ),
         ],
       );
     },
@@ -206,17 +226,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                DriverHomeHeader(isOnline: _isOnline),
-                Positioned(left: 0, right: 0, top: 215, child: VehicleCard()),
+                DriverHomeHeader(isOnline: _isOnline, driver: _driver),
+                Positioned(left: 0, right: 0, top: 215, child: VehicleCard(vehicle: _driver?['vehicle'] as Map<String, dynamic>?)),
                 Positioned(
-                  right: 24,
-                  top: 119,
-                  width: 154,
-                  height: 124,
-                  child: Image(
-                    image: AssetImage('assets/images/driver-auto-overlay.png'),
-                    fit: BoxFit.contain,
-                  ),
+                  right: 20,
+                  top: 117,
+                  width: 170,
+                  height: 112,
+                  child: _DriverVehicleImage(vehicle: _driver?['vehicle'] as Map<String, dynamic>?),
                 ),
               ],
             ),
@@ -232,7 +249,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           sliver: SliverList.list(
             children: [
               if (_activeTrip != null) ...[
-                ActiveTripCard(trip: _activeTrip!, busy: _tripBusy, onAction: _advanceTrip),
+                ActiveTripCard(
+                  trip: _activeTrip!,
+                  busy: _tripBusy,
+                  onAction: _advanceTrip,
+                ),
                 const SizedBox(height: 11),
               ],
               const TodayOverview(),
@@ -278,4 +299,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       onStatusTap: _changingStatus ? () {} : _changeAvailability,
     ),
   );
+}
+
+class _DriverVehicleImage extends StatelessWidget {
+  const _DriverVehicleImage({required this.vehicle});
+  final Map<String, dynamic>? vehicle;
+  @override
+  Widget build(BuildContext context) {
+    final source = DriverApiService.absoluteUrl(vehicle?['masterPhoto']?.toString());
+    return source.isEmpty
+        ? Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain, alignment: Alignment.bottomRight)
+        : Image.network(source, fit: BoxFit.contain, alignment: Alignment.bottomRight, errorBuilder: (_, __, ___) => Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain));
+  }
 }

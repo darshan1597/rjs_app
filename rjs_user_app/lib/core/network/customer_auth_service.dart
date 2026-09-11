@@ -14,6 +14,8 @@ class CustomerAuthService {
   static Uri _uri(String path) =>
       Uri.parse('$_base/api/v1/customer/auth/$path');
   static Uri _apiUri(String path) => Uri.parse('$_base/api/v1/$path');
+  static String absoluteUrl(String path) =>
+      path.startsWith('http') ? path : '$_base$path';
 
   static Map<String, dynamic> _decode(http.Response response) {
     Map<String, dynamic> decoded;

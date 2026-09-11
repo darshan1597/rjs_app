@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LuArrowLeft,
   LuArrowRight,
@@ -16,7 +16,7 @@ import {
 } from "react-icons/lu";
 import { useNavigate } from "react-router-dom";
 import AdminLayout from "../components/AdminLayout.jsx";
-import { post, upload } from "../services/api.js";
+import { get, post, upload } from "../services/api.js";
 
 const steps = [
   "Personal Details",
@@ -28,6 +28,7 @@ const steps = [
   "Review & Submit",
 ];
 const initial = {
+  serviceAssignment: "",
   personal: {
     fullName: "",
     phone: "",
@@ -49,11 +50,14 @@ const initial = {
     backUrl: "",
   },
   vehicle: {
-    category: "AUTO",
+    categoryId: "",
+    variantId: "",
     registrationNumber: "",
     manufacturer: "",
     model: "",
     fuelType: "",
+    color: "",
+    ownershipType: "",
     seatingCapacity: "",
     manufacturingYear: "",
     frontPhoto: "",
@@ -136,6 +140,10 @@ export default function AddDriverPage() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(initial);
   const [error, setError] = useState("");
+  const [vehicleCategories, setVehicleCategories] = useState([]);
+  const [vehicleVariants, setVehicleVariants] = useState([]);
+  const selectedCategory = vehicleCategories.find((item) => item._id === form.vehicle.categoryId);
+  const selectedVariant = vehicleVariants.find((item) => item._id === form.vehicle.variantId);
   const [validationIssues, setValidationIssues] = useState([]);
   const [saving, setSaving] = useState(false);
   const [phoneVerificationToken, setPhoneVerificationToken] = useState("");
@@ -152,20 +160,29 @@ export default function AddDriverPage() {
       "Vehicle Insurance",
       "Pollution Certificate (PUC)",
       "Vehicle Permit",
-      ...(form.vehicle.category === "BUS" ||
-      form.vehicle.category === "TEMPO_TRAVELLER"
+      ...(selectedCategory?.code === "BUS" ||
+      selectedCategory?.code === "TEMPO_TRAVELLER"
         ? ["Fitness Certificate"]
         : []),
       "Aadhaar Card",
       "PAN Card",
     ],
-    [form.vehicle.category],
+    [selectedCategory?.code],
   );
   const update = (section, key, value) =>
     setForm((old) => ({
       ...old,
       [section]: { ...old[section], [key]: value },
     }));
+  useEffect(() => {
+    get("/admin/vehicles/categories?limit=100").then((data) => setVehicleCategories(data.items.filter((item) => item.isActive))).catch((requestError) => setError(requestError.message));
+  }, []);
+  useEffect(() => {
+    setVehicleVariants([]);
+    update("vehicle", "variantId", "");
+    if (!form.vehicle.categoryId) return;
+    get(`/admin/vehicles/categories/${form.vehicle.categoryId}/variants?limit=100`).then((data) => setVehicleVariants(data.items.filter((item) => item.isActive))).catch((requestError) => setError(requestError.message));
+  }, [form.vehicle.categoryId]);
   const normalizedPhone = () =>
     String(form.personal.phone || "")
       .replace(/\D/g, "")
@@ -268,8 +285,12 @@ export default function AddDriverPage() {
       if (!form.licence.frontUrl || !form.licence.backUrl)
         return fail("Upload both the front and back of the driving licence.");
     }
-    if (currentStep === 2 && !form.vehicle.category)
+    if (currentStep === 2 && !form.vehicle.categoryId)
       return fail("Select a vehicle category.");
+    if (currentStep === 2 && !form.vehicle.variantId)
+      return fail("Select a vehicle variant.");
+    if (currentStep === 2 && !form.serviceAssignment)
+      return fail("Select Local, Outstation, or Flexible driving assignment.");
     if (currentStep === 3) {
       if (value(form.vehicle.registrationNumber).length < 5)
         return fail("Enter a valid vehicle registration number.");
@@ -279,6 +300,8 @@ export default function AddDriverPage() {
         return fail("Enter the vehicle model.");
       if (value(form.vehicle.fuelType).length < 2)
         return fail("Enter the vehicle fuel type.");
+      if (value(form.vehicle.color).length < 2) return fail("Enter the vehicle colour.");
+      if (!form.vehicle.ownershipType) return fail("Select the vehicle ownership type.");
       const seats = Number(form.vehicle.seatingCapacity);
       if (!Number.isInteger(seats) || seats < 1 || seats > 100)
         return fail("Seating capacity must be between 1 and 100.");
@@ -618,43 +641,28 @@ export default function AddDriverPage() {
             </div>
           )}
           {step === 2 && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                ["AUTO", "Auto"],
-                ["CAR", "Car"],
-                ["TEMPO_TRAVELLER", "Tempo Traveller"],
-                ["BUS", "Bus"],
-              ].map(([value, label]) => (
-                <button
-                  type="button"
-                  key={value}
-                  onClick={() => update("vehicle", "category", value)}
-                  className={`flex items-center gap-4 rounded-2xl border p-5 text-left ${form.vehicle.category === value ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}
-                >
-                  <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-xl text-emerald-600">
-                    {value === "BUS" || value === "TEMPO_TRAVELLER" ? (
-                      <LuBus />
-                    ) : (
-                      <LuCarFront />
-                    )}
-                  </span>
-                  <span className="flex-1">
-                    <b className="block text-sm">{label}</b>
-                    <small className="text-[9px] text-slate-500">
-                      {value === "AUTO"
-                        ? "3 passengers"
-                        : value === "CAR"
-                          ? "4–7 passengers"
-                          : value === "BUS"
-                            ? "20+ passengers"
-                            : "8–20 passengers"}
-                    </small>
-                  </span>
-                  {form.vehicle.category === value && (
-                    <LuCheck className="text-emerald-600" />
-                  )}
-                </button>
-              ))}
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-3 text-[11px] font-black">Driving assignment</h3>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["LOCAL", "Local", "Local cab rides only"],
+                    ["OUTSTATION", "Outstation", "Packages and outstation trips"],
+                    ["FLEXIBLE", "Flexible", "Eligible for both types"],
+                  ].map(([key, label, help]) => (
+                    <button type="button" key={key} onClick={() => setForm((old) => ({ ...old, serviceAssignment: key }))} className={`rounded-2xl border p-4 text-left ${form.serviceAssignment === key ? "border-blue-500 bg-blue-50" : "border-slate-200"}`}>
+                      <b className="block text-[11px]">{label}</b>
+                      <small className="mt-1 block text-[8px] text-slate-500">{help}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div><h3 className="mb-3 text-[11px] font-black">Vehicle category</h3><div className="grid gap-4 sm:grid-cols-2">
+                {vehicleCategories.map((item) => <button type="button" key={item._id} onClick={() => update("vehicle", "categoryId", item._id)} className={`flex items-center gap-4 rounded-2xl border p-5 text-left ${form.vehicle.categoryId === item._id ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><span className="grid h-16 w-24 place-items-center rounded-xl bg-white p-2"><img src={item.photoUrl} alt={item.name} className="h-full w-full object-contain" /></span><b className="flex-1 text-sm">{item.name}</b>{form.vehicle.categoryId === item._id && <LuCheck className="text-emerald-600" />}</button>)}
+              </div></div>
+              {form.vehicle.categoryId && <div><h3 className="mb-3 text-[11px] font-black">Vehicle variant</h3><div className="grid gap-4 sm:grid-cols-2">
+                {vehicleVariants.map((item) => <button type="button" key={item._id} onClick={() => update("vehicle", "variantId", item._id)} className={`flex items-center gap-4 rounded-2xl border p-4 text-left ${form.vehicle.variantId === item._id ? "border-orange-500 bg-orange-50" : "border-slate-200"}`}><span className="grid h-14 w-24 place-items-center rounded-xl bg-white p-2"><img src={item.photoUrl} alt={item.name} className="h-full w-full object-contain" /></span><b className="flex-1 text-[11px]">{item.name}</b>{form.vehicle.variantId === item._id && <LuCheck className="text-orange-500" />}</button>)}
+              </div>{vehicleVariants.length === 0 && <p className="rounded-xl bg-amber-50 p-4 text-[10px] text-amber-700">No active variants are available in this category.</p>}</div>}
             </div>
           )}
           {step === 3 && (
@@ -664,6 +672,7 @@ export default function AddDriverPage() {
                 ["manufacturer", "Manufacturer", "text"],
                 ["model", "Model", "text"],
                 ["fuelType", "Fuel Type", "text"],
+                ["color", "Colour", "text"],
                 ["seatingCapacity", "Seating Capacity", "number"],
                 ["manufacturingYear", "Manufacturing Year", "number"],
               ].map(([key, label, type]) => (
@@ -677,6 +686,11 @@ export default function AddDriverPage() {
                   />
                 </Field>
               ))}
+              <Field label="Ownership Type">
+                <select required value={form.vehicle.ownershipType} onChange={(e) => update("vehicle", "ownershipType", e.target.value)} className={inputClass}>
+                  <option value="">Select ownership</option><option value="RJS_OWNED">RJS owned</option><option value="DRIVER_OWNED">Driver owned</option><option value="THIRD_PARTY">Third party</option>
+                </select>
+              </Field>
               <FileField
                 label="Vehicle front photo"
                 value={form.vehicle.frontPhoto}
@@ -792,7 +806,7 @@ export default function AddDriverPage() {
                 [
                   LuCarFront,
                   "Vehicle",
-                  `${form.vehicle.category.replaceAll("_", " ")} · ${form.vehicle.registrationNumber}`,
+                  `${selectedCategory?.name || "Category"} / ${selectedVariant?.name || "Variant"} · ${form.vehicle.registrationNumber}`,
                   2,
                 ],
                 [LuFileUp, "Documents", `${docs.length} required documents`, 4],

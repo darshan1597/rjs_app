@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/network/driver_api_service.dart';
 
 class VehicleCard extends StatelessWidget {
-  const VehicleCard({super.key});
+  const VehicleCard({this.vehicle, super.key});
+  final Map<String, dynamic>? vehicle;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -30,23 +32,20 @@ class VehicleCard extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: const Color(0xFFD9EEE2)),
           ),
-          child: Image.asset(
-            'assets/images/driver-auto-thumbnail.png',
-            fit: BoxFit.cover,
-          ),
+          child: _image(),
         ),
         const SizedBox(width: 12),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Your Auto',
+                'Your ${_display(vehicle?['category'], 'Vehicle')}',
                 style: TextStyle(color: AppColors.muted, fontSize: 11),
               ),
               SizedBox(height: 2),
               Text(
-                'KA 05 AB 1234',
+                vehicle?['registrationNumber']?.toString() ?? 'Vehicle not assigned',
                 style: TextStyle(
                   color: AppColors.navy,
                   fontSize: 14.5,
@@ -55,7 +54,7 @@ class VehicleCard extends StatelessWidget {
               ),
               SizedBox(height: 2),
               Text(
-                'Bajaj RE Compact  •  CNG',
+                '${vehicle?['manufacturer'] ?? ''} ${vehicle?['model'] ?? ''}  •  ${vehicle?['fuelType'] ?? ''}'.trim(),
                 style: TextStyle(color: AppColors.muted, fontSize: 11),
               ),
             ],
@@ -95,4 +94,16 @@ class VehicleCard extends StatelessWidget {
       ],
     ),
   );
+
+  Widget _image() {
+    final source = DriverApiService.absoluteUrl(vehicle?['masterPhoto']?.toString());
+    return source.isEmpty
+        ? Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain)
+        : Image.network(source, fit: BoxFit.contain, errorBuilder: (_, __, ___) => Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain));
+  }
+  String _display(dynamic value, String fallback) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty) return fallback;
+    return text.replaceAll('_', ' ').toLowerCase().split(' ').map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}').join(' ');
+  }
 }

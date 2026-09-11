@@ -4,7 +4,6 @@ import { env } from './config/env.js';
 
 async function start() {
   await connectDatabase();
-  console.log("MongoDB Connected");
   const app = createApp();
   const server = app.listen(env.PORT, () => {
     console.log(`RJS backend listening on port ${env.PORT}`);

@@ -19,6 +19,12 @@ import PaymentsPage from './pages/PaymentsPage.jsx';
 import DriverDetailsPage from './pages/DriverDetailsPage.jsx';
 import BookingDetailsPage from './pages/BookingDetailsPage.jsx';
 import SupportTicketsPage from './pages/SupportTicketsPage.jsx';
+import VehiclesPage from './pages/VehiclesPage.jsx';
+import AddVehiclePage from './pages/AddVehiclePage.jsx';
+import VehicleVariantsPage from './pages/VehicleVariantsPage.jsx';
+import CustomEnquiryPage from './pages/CustomEnquiryPage.jsx';
+import CustomEnquiriesPage from './pages/CustomEnquiriesPage.jsx';
+import CustomEnquiryDetailsPage from './pages/CustomEnquiryDetailsPage.jsx';
 
 export default function App() {
   const { admin, challenge, setupResult } = useAuth();
@@ -38,7 +44,15 @@ export default function App() {
       <Route path="/drivers" element={admin ? (admin.accountType === 'EMPLOYEE' ? <DriversPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/drivers/add" element={admin ? (admin.accountType === 'EMPLOYEE' ? <AddDriverPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/drivers/:id" element={admin ? (admin.accountType === 'EMPLOYEE' ? <DriverDetailsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/vehicles" element={admin ? (admin.accountType === 'EMPLOYEE' ? <VehiclesPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/vehicles/categories/add" element={admin ? (admin.accountType === 'EMPLOYEE' ? <AddVehiclePage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/vehicles/categories/:categoryId" element={admin ? (admin.accountType === 'EMPLOYEE' ? <VehicleVariantsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/vehicles/categories/:categoryId/variants/add" element={admin ? (admin.accountType === 'EMPLOYEE' ? <AddVehiclePage variant /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/bookings" element={admin ? (admin.accountType === 'EMPLOYEE' ? <BookingsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/custom-enquiries" element={admin ? (admin.accountType === 'EMPLOYEE' ? <CustomEnquiriesPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/custom-enquiries/add" element={admin ? (admin.accountType === 'EMPLOYEE' ? <CustomEnquiryPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/custom-enquiries/:id/edit" element={admin ? (admin.accountType === 'EMPLOYEE' ? <CustomEnquiryPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/custom-enquiries/:id" element={admin ? (admin.accountType === 'EMPLOYEE' ? <CustomEnquiryDetailsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/bookings/:id" element={admin ? (admin.accountType === 'EMPLOYEE' ? <BookingDetailsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/support-tickets" element={admin ? (admin.accountType === 'EMPLOYEE' ? <SupportTicketsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/tour-packages" element={admin ? (admin.accountType === 'EMPLOYEE' ? <TourPackagesPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />

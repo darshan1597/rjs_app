@@ -13,9 +13,10 @@ import { systemSettingsRouter } from './modules/settings/system-settings.routes.
 import { adminDashboardRouter } from './modules/dashboard/admin-dashboard.routes.js';
 import { employeeDashboardRouter } from './modules/dashboard/employee-dashboard.routes.js';
 import { driverRouter } from './modules/drivers/driver.routes.js';
+import { vehicleRouter } from './modules/vehicles/vehicle.routes.js';
 import { bookingRouter } from './modules/bookings/booking.routes.js';
 import { tourPackageRouter } from './modules/tour-packages/tour-package.routes.js';
-import { driverFiles, mediaRouter, tourPackageImages } from './modules/media/media.routes.js';
+import { driverFiles, mediaRouter, tourPackageImages, vehicleImages } from './modules/media/media.routes.js';
 import { paymentRouter } from './modules/payments/payment.routes.js';
 import { supportRouter } from './modules/support/support.routes.js';
 import { customerAuthRouter } from './modules/customers/customer-auth.routes.js';
@@ -23,6 +24,8 @@ import { customerAddressRouter } from './modules/customers/customer-address.rout
 import { customerBookingRouter } from './modules/customers/customer-booking.routes.js';
 import { driverAuthRouter } from './modules/drivers/driver-auth.routes.js';
 import { driverTripRouter } from './modules/drivers/driver-trip.routes.js';
+import { enquiryRouter } from './modules/enquiries/enquiry.routes.js';
+import { customerMapRouter } from './modules/maps/customer-map.routes.js';
 
 function createApp() {
   const app = express();
@@ -54,16 +57,20 @@ function createApp() {
   app.use('/api/v1/admin/dashboard', adminDashboardRouter);
   app.use('/api/v1/admin/employee-dashboard', employeeDashboardRouter);
   app.use('/api/v1/admin/drivers', driverRouter);
+  app.use('/api/v1/admin/vehicles', vehicleRouter);
   app.use('/api/v1/admin/bookings', bookingRouter);
+  app.use('/api/v1/admin/enquiries', enquiryRouter);
   app.use('/api/v1/admin/tour-packages', tourPackageRouter);
   app.use('/api/v1/admin/media', mediaRouter);
   app.use('/api/v1/media/tour-package-images', tourPackageImages);
   app.use('/api/v1/media/driver-files', driverFiles);
+  app.use('/api/v1/media/vehicle-images', vehicleImages);
   app.use('/api/v1/admin/payments', paymentRouter);
   app.use('/api/v1/admin/support-tickets', supportRouter);
   app.use('/api/v1/customer/auth', customerAuthRouter);
   app.use('/api/v1/customer/addresses', customerAddressRouter);
   app.use('/api/v1/customer/bookings', customerBookingRouter);
+  app.use('/api/v1/customer/maps', customerMapRouter);
   app.use('/api/v1/driver/auth', driverAuthRouter);
   app.use('/api/v1/driver/trips', driverTripRouter);
 

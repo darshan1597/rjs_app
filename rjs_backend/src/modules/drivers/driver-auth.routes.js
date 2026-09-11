@@ -21,8 +21,10 @@ const safeDriver = (driver) => ({
   driverCode: driver.driverCode,
   status: driver.status,
   operationalStatus: driver.operationalStatus,
+  serviceAssignment: driver.serviceAssignment,
   name: driver.personal.fullName,
   phone: driver.personal.phone,
+  email: driver.personal.email,
   profilePhoto: driver.personal.profilePhoto,
   vehicle: driver.vehicle,
 });

@@ -182,7 +182,8 @@ export default function DriversPage() {
                       </td>
                       <td className="px-5 py-4">
                         <b className="block">
-                          {vehicleName[driver.vehicle.category]}
+                          {driver.vehicle.categoryId?.name || vehicleName[driver.vehicle.category] || driver.vehicle.category}
+                          {driver.vehicle.variantId?.name && <small className="block text-[8px] font-normal text-slate-400">{driver.vehicle.variantId.name}</small>}
                         </b>
                         <small className="text-[8px] text-slate-400">
                           {driver.vehicle.registrationNumber}
