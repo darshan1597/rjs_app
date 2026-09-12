@@ -1,6 +1,68 @@
-import { writeAuditLog } from '../audit/audit.service.js'; import { createTourPackage as createRecord, getTourPackage as getRecord, listTourPackages as listRecords, updateTourPackage as updateRecord } from './tour-package.service.js';
-async function listTourPackages(req,res,next){try{return res.json({success:true,data:await listRecords(req.validated.query)});}catch(error){return next(error);}}
-async function getTourPackage(req,res,next){try{return res.json({success:true,data:await getRecord(req.validated.params.packageId)});}catch(error){return next(error);}}
-async function createTourPackage(req,res,next){try{const item=await createRecord(req.validated.body,req.admin.id);await writeAuditLog({req,action:'tour-package.create',actor:req.admin,targetType:'TourPackage',targetId:item.id});return res.status(201).json({success:true,data:item});}catch(error){return next(error);}}
-async function updateTourPackage(req,res,next){try{const item=await updateRecord(req.validated.params.packageId,req.validated.body,req.admin.id);await writeAuditLog({req,action:'tour-package.update',actor:req.admin,targetType:'TourPackage',targetId:item.id,metadata:req.validated.body});return res.json({success:true,data:item});}catch(error){return next(error);}}
-export { createTourPackage, getTourPackage, listTourPackages, updateTourPackage };
+import { writeAuditLog } from "../audit/audit.service.js";
+import {
+    createTourPackage as createRecord,
+    getTourPackage as getRecord,
+    listTourPackages as listRecords,
+    updateTourPackage as updateRecord,
+} from "./tour-package.service.js";
+async function listTourPackages(req, res, next) {
+    try {
+        return res.json({
+            success: true,
+            data: await listRecords(req.validated.query),
+        });
+    } catch (error) {
+        return next(error);
+    }
+}
+async function getTourPackage(req, res, next) {
+    try {
+        return res.json({
+            success: true,
+            data: await getRecord(req.validated.params.packageId),
+        });
+    } catch (error) {
+        return next(error);
+    }
+}
+async function createTourPackage(req, res, next) {
+    try {
+        const item = await createRecord(req.validated.body, req.admin.id);
+        await writeAuditLog({
+            req,
+            action: "tour-package.create",
+            actor: req.admin,
+            targetType: "TourPackage",
+            targetId: item.id,
+        });
+        return res.status(201).json({ success: true, data: item });
+    } catch (error) {
+        return next(error);
+    }
+}
+async function updateTourPackage(req, res, next) {
+    try {
+        const item = await updateRecord(
+            req.validated.params.packageId,
+            req.validated.body,
+            req.admin.id,
+        );
+        await writeAuditLog({
+            req,
+            action: "tour-package.update",
+            actor: req.admin,
+            targetType: "TourPackage",
+            targetId: item.id,
+            metadata: req.validated.body,
+        });
+        return res.json({ success: true, data: item });
+    } catch (error) {
+        return next(error);
+    }
+}
+export {
+    createTourPackage,
+    getTourPackage,
+    listTourPackages,
+    updateTourPackage,
+};

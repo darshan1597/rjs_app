@@ -35,6 +35,7 @@ function calculateLocalFare({
   distanceKm,
   waitingMinutes = 0,
   tollCharge = 0,
+  parkingCharge = 0,
   bookedAt = new Date(),
 }) {
   const vehicleValue = Number(onRoadPrice);
@@ -62,7 +63,8 @@ function calculateLocalFare({
   const taxableSubtotal = money(distanceFare + waitingCharge + nightSurcharge);
   const gstAmount = money(taxableSubtotal * LOCAL_FARE_CONFIG.gstPercent / 100);
   const toll = money(Math.max(0, Number(tollCharge) || 0));
-  const totalFare = money(taxableSubtotal + gstAmount + toll);
+  const parking = money(Math.max(0, Number(parkingCharge) || 0));
+  const totalFare = money(taxableSubtotal + gstAmount + toll + parking);
 
   return {
     vehicleOnRoadPrice: vehicleValue,
@@ -85,6 +87,7 @@ function calculateLocalFare({
     gstPercent: LOCAL_FARE_CONFIG.gstPercent,
     gstAmount,
     tollCharge: toll,
+    parkingCharge: parking,
     totalFare,
   };
 }

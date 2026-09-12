@@ -1,1 +1,29 @@
-import{z}from'zod';const empty=z.object({});const id=z.string().regex(/^[a-f\d]{24}$/i);const listPaymentsSchema=z.object({body:z.unknown().optional(),params:empty,query:z.object({tab:z.enum(['transactions','payouts','refunds']).default('transactions'),page:z.coerce.number().int().positive().default(1),limit:z.coerce.number().int().min(1).max(100).default(10),search:z.string().trim().max(100).optional(),status:z.string().trim().max(30).optional(),method:z.enum(['UPI','CARD','NET_BANKING','WALLET']).optional()})});const payoutActionSchema=z.object({body:empty,params:z.object({payoutId:id}),query:empty});const refundActionSchema=z.object({body:z.object({decision:z.enum(['APPROVED','REJECTED']),note:z.string().trim().min(3).max(500)}),params:z.object({refundId:id}),query:empty});export{listPaymentsSchema,payoutActionSchema,refundActionSchema};
+import { z } from "zod";
+const empty = z.object({});
+const id = z.string().regex(/^[a-f\d]{24}$/i);
+const listPaymentsSchema = z.object({
+    body: z.unknown().optional(),
+    params: empty,
+    query: z.object({
+        tab: z.enum(["transactions", "payouts", "refunds"]).default("transactions"),
+        page: z.coerce.number().int().positive().default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(10),
+        search: z.string().trim().max(100).optional(),
+        status: z.string().trim().max(30).optional(),
+        method: z.enum(["UPI", "CARD", "NET_BANKING", "WALLET"]).optional(),
+    }),
+});
+const payoutActionSchema = z.object({
+    body: empty,
+    params: z.object({ payoutId: id }),
+    query: empty,
+});
+const refundActionSchema = z.object({
+    body: z.object({
+        decision: z.enum(["APPROVED", "REJECTED"]),
+        note: z.string().trim().min(3).max(500),
+    }),
+    params: z.object({ refundId: id }),
+    query: empty,
+});
+export { listPaymentsSchema, payoutActionSchema, refundActionSchema };

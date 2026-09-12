@@ -5,6 +5,7 @@ import { confirmPhoneVerification, createDriver, getDriverDetails, listDrivers, 
 import { createDriverSchema, driverDetailsSchema, listDriversSchema, phoneVerificationConfirmSchema, phoneVerificationRequestSchema, updateDriverStatusSchema } from './driver.schemas.js';
 
 const driverRouter = express.Router();
+
 driverRouter.use(authenticateAdmin, requireEmployee);
 driverRouter.get('/', validate(listDriversSchema), listDrivers);
 driverRouter.post('/phone-verification/request-otp', validate(phoneVerificationRequestSchema), requestPhoneVerification);
@@ -12,4 +13,5 @@ driverRouter.post('/phone-verification/verify-otp', validate(phoneVerificationCo
 driverRouter.post('/', validate(createDriverSchema), createDriver);
 driverRouter.get('/:driverId', validate(driverDetailsSchema), getDriverDetails);
 driverRouter.patch('/:driverId/status', validate(updateDriverStatusSchema), updateDriverStatus);
+
 export { driverRouter };

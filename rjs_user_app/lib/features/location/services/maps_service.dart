@@ -4,6 +4,26 @@ import '../../../core/network/customer_auth_service.dart';
 import '../models/map_place.dart';
 
 class MapsService {
+  static Future<Map<String, dynamic>> route({
+    required MapPlace origin,
+    required MapPlace destination,
+  }) async {
+    final data = await CustomerAuthService.authorizedPost(
+      'customer/maps/route',
+      {
+        'origin': {
+          'latitude': origin.latitude,
+          'longitude': origin.longitude,
+        },
+        'destination': {
+          'latitude': destination.latitude,
+          'longitude': destination.longitude,
+        },
+      },
+    );
+    return data['route'] as Map<String, dynamic>;
+  }
+
   static Future<List<Map<String, dynamic>>> autocomplete({required String input, required String sessionToken, double? latitude, double? longitude}) async {
     final query = <String, String>{
       'input': input,

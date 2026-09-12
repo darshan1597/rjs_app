@@ -18,6 +18,7 @@ import { bookingRouter } from './modules/bookings/booking.routes.js';
 import { tourPackageRouter } from './modules/tour-packages/tour-package.routes.js';
 import { driverFiles, mediaRouter, tourPackageImages, vehicleImages } from './modules/media/media.routes.js';
 import { paymentRouter } from './modules/payments/payment.routes.js';
+import { razorpayWebhookRouter } from './modules/payments/razorpay-webhook.routes.js';
 import { supportRouter } from './modules/support/support.routes.js';
 import { customerAuthRouter } from './modules/customers/customer-auth.routes.js';
 import { customerAddressRouter } from './modules/customers/customer-address.routes.js';
@@ -46,6 +47,7 @@ function createApp() {
     credentials: true,
   }));
   app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8' }));
+  app.use('/api/v1/payments/razorpay/webhook', razorpayWebhookRouter);
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
 

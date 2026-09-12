@@ -1,6 +1,5 @@
 import express from 'express';
 import { z } from 'zod';
-
 import { AppError } from '../../common/errors/app-error.js';
 import { validate } from '../../common/middleware/validate.js';
 import { authenticateCustomer } from './customer-auth.middleware.js';
@@ -21,6 +20,7 @@ const fields = z.object({
     longitude: z.number().min(-180).max(180),
   }).optional(),
 });
+
 const createSchema = z.object({ body: fields, params: empty, query: empty });
 const updateSchema = z.object({ body: fields, params: z.object({ id }), query: empty });
 const idSchema = z.object({ body: empty, params: z.object({ id }), query: empty });

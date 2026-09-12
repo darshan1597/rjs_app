@@ -1,5 +1,173 @@
-import mongoose from 'mongoose';
-const paymentSchema=new mongoose.Schema({transactionId:{type:String,required:true,unique:true,index:true},bookingId:{type:mongoose.Schema.Types.ObjectId,ref:'Booking',required:true,index:true},customerName:{type:String,required:true,trim:true},customerPhone:{type:String,required:true,trim:true},bookingType:{type:String,required:true,trim:true},method:{type:String,enum:['UPI','CARD','NET_BANKING','WALLET'],required:true},methodDisplay:{type:String,required:true,trim:true},gatewayReference:{type:String,trim:true},amount:{type:Number,required:true,min:0},status:{type:String,enum:['PENDING','PAID','FAILED','REFUNDED','PARTIALLY_REFUNDED'],default:'PENDING',index:true},paidAt:Date},{timestamps:true});
-const driverPayoutSchema=new mongoose.Schema({payoutId:{type:String,required:true,unique:true,index:true},driverId:{type:mongoose.Schema.Types.ObjectId,ref:'Driver',required:true,index:true},periodStart:{type:Date,required:true},periodEnd:{type:Date,required:true},completedTrips:{type:Number,default:0},grossEarnings:{type:Number,min:0,required:true},deductions:{type:Number,min:0,default:0},incentives:{type:Number,min:0,default:0},netPayout:{type:Number,min:0,required:true},bankAccountEnding:{type:String,required:true},status:{type:String,enum:['PENDING','PROCESSING','PAID','FAILED','ON_HOLD'],default:'PENDING',index:true},payoutDate:Date,failureReason:String},{timestamps:true});
-const refundSchema=new mongoose.Schema({refundId:{type:String,required:true,unique:true,index:true},paymentId:{type:mongoose.Schema.Types.ObjectId,ref:'Payment',required:true},bookingId:{type:mongoose.Schema.Types.ObjectId,ref:'Booking',required:true},customerName:{type:String,required:true},reason:{type:String,required:true},originalAmount:{type:Number,required:true},eligibleAmount:{type:Number,required:true},cancellationCharge:{type:Number,min:0,default:0},status:{type:String,enum:['PENDING','APPROVED','REJECTED','PROCESSING','COMPLETED','FAILED'],default:'PENDING',index:true},reviewedBy:{type:mongoose.Schema.Types.ObjectId,ref:'AdminAccount'},reviewedAt:Date,reviewNote:String},{timestamps:true});
-const Payment=mongoose.model('Payment',paymentSchema);const DriverPayout=mongoose.model('DriverPayout',driverPayoutSchema);const Refund=mongoose.model('Refund',refundSchema);export{DriverPayout,Payment,Refund};
+import mongoose from "mongoose";
+const paymentSchema = new mongoose.Schema(
+    {
+        transactionId: { 
+            type: String, 
+            required: true, 
+            unique: true, 
+            index: true 
+        },
+        bookingId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Booking",
+            required: true,
+            index: true,
+        },
+        customerName: { 
+            type: String, 
+            required: true, 
+            trim: true 
+        },
+        customerPhone: { 
+            type: String, 
+            required: true, 
+            trim: true 
+        },
+        bookingType: { 
+            type: String, 
+            required: true, 
+            trim: true 
+        },
+        method: {
+            type: String,
+            enum: ["UPI", "CARD", "NET_BANKING", "WALLET"],
+            required: true,
+        },
+        methodDisplay: { 
+            type: String, 
+            required: true, 
+            trim: true 
+        },
+        gatewayReference: { 
+            type: String, 
+            trim: true 
+        },
+        razorpayOrderId: { 
+            type: String, 
+            index: true 
+        },
+        razorpayPaymentId: { 
+            type: String, 
+            index: true 
+        },
+        razorpayQrCodeId: { 
+            type: String, 
+            index: true 
+        },
+        amount: { 
+            type: Number, 
+            required: true, 
+            min: 0 
+        },
+        status: {
+            type: String,
+            enum: ["PENDING", "PAID", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED"],
+            default: "PENDING",
+            index: true,
+        },
+        paidAt: Date,
+    },
+    { timestamps: true },
+);
+const driverPayoutSchema = new mongoose.Schema(
+    {
+        payoutId: { 
+            type: String, 
+            required: true, 
+            unique: true, 
+            index: true 
+        },
+        driverId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Driver",
+            required: true,
+            index: true,
+        },
+        periodStart: { 
+            type: Date, 
+            required: true 
+        },
+        periodEnd: { 
+            type: Date, 
+            required: true 
+        },
+        completedTrips: { 
+            type: Number, 
+            default: 0 
+        },
+        grossEarnings: { 
+            type: Number, 
+            min: 0, 
+            required: true 
+        },
+        deductions: { 
+            type: Number, 
+            min: 0, 
+            default: 0 
+        },
+        incentives: { 
+            type: Number, 
+            min: 0, 
+            default: 0 
+        },
+        netPayout: { 
+            type: Number, 
+            min: 0, 
+            required: true 
+        },
+        bankAccountEnding: { 
+            type: String, 
+            required: true 
+        },
+        status: {
+            type: String,
+            enum: ["PENDING", "PROCESSING", "PAID", "FAILED", "ON_HOLD"],
+            default: "PENDING",
+            index: true,
+        },
+        payoutDate: Date,
+        failureReason: String,
+    },
+    { timestamps: true },
+);
+const refundSchema = new mongoose.Schema(
+    {
+        refundId: { type: String, required: true, unique: true, index: true },
+        paymentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Payment",
+        required: true,
+        },
+        bookingId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Booking",
+        required: true,
+        },
+        customerName: { type: String, required: true },
+        reason: { type: String, required: true },
+        originalAmount: { type: Number, required: true },
+        eligibleAmount: { type: Number, required: true },
+        cancellationCharge: { type: Number, min: 0, default: 0 },
+        status: {
+        type: String,
+        enum: [
+            "PENDING",
+            "APPROVED",
+            "REJECTED",
+            "PROCESSING",
+            "COMPLETED",
+            "FAILED",
+        ],
+        default: "PENDING",
+        index: true,
+        },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "AdminAccount" },
+        reviewedAt: Date,
+        reviewNote: String,
+    },
+    { timestamps: true },
+);
+const Payment = mongoose.model("Payment", paymentSchema);
+const DriverPayout = mongoose.model("DriverPayout", driverPayoutSchema);
+const Refund = mongoose.model("Refund", refundSchema);
+export { DriverPayout, Payment, Refund };

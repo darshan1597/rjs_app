@@ -30,25 +30,34 @@ async function createDriver(data, creatorId) {
   } catch (_) {
     throw new AppError(400, 'PHONE_VERIFICATION_REQUIRED', 'Verify the driver phone number again');
   }
+
   const phone = String(data.personal.phone).replace(/\D/g, '').slice(-10);
+
   if (verification.purpose !== 'driver_phone_verification' || verification.phone !== phone || String(verification.adminId) !== String(creatorId)) {
     throw new AppError(400, 'PHONE_VERIFICATION_MISMATCH', 'The verified phone number does not match the driver phone number');
   }
+
   delete data.phoneVerificationToken;
+
   const [category, variant] = await Promise.all([
     VehicleCategory.findOne({ _id: data.vehicle.categoryId, isActive: true }),
     VehicleVariant.findOne({ _id: data.vehicle.variantId, categoryId: data.vehicle.categoryId, isActive: true }),
   ]);
+
   if (!category || !variant) throw new AppError(422, 'VEHICLE_UNAVAILABLE', 'Choose an active vehicle category and variant');
+
   data.vehicle.category = category.code;
   data.vehicle.variant = variant.code;
   data.vehicle.masterPhoto = variant.photoUrl;
   data.personal.phoneVerifiedAt = new Date();
+
   const duplicate = await Driver.findOne({ $or: [
     { 'personal.phone': data.personal.phone }, { 'licence.number': data.licence.number.toUpperCase() },
     { 'vehicle.registrationNumber': data.vehicle.registrationNumber.toUpperCase() },
   ] });
+
   if (duplicate) throw new AppError(409, 'DRIVER_ALREADY_EXISTS', 'A driver, licence, or vehicle with these details already exists');
+
   return Driver.create({ ...data, createdBy: creatorId });
 }
 
@@ -60,7 +69,9 @@ async function updateDriverStatus(driverId, status) {
 
 async function getDriverDetails(driverId) {
   const driver = await Driver.findById(driverId).populate('vehicle.categoryId', 'name code photoUrl').populate('vehicle.variantId', 'name code photoUrl onRoadPrice').lean();
+
   if (!driver) throw new AppError(404, 'DRIVER_NOT_FOUND', 'Driver was not found');
+  
   const [bookings, payoutSummary] = await Promise.all([
     Booking.find({ currentDriverId: driverId }).sort({ scheduledStartAt: -1 }).limit(12).select('bookingNumber serviceType pickup destination packageName scheduledStartAt scheduledEndAt status passengerCount').lean(),
     DriverPayout.aggregate([{ $match: { driverId: driver._id } }, { $group: { _id: null, totalPaid: { $sum: { $cond: [{ $eq: ['$status', 'PAID'] }, '$netPayout', 0] } }, pendingPayout: { $sum: { $cond: [{ $in: ['$status', ['PENDING', 'PROCESSING']] }, '$netPayout', 0] } }, completedTrips: { $sum: '$completedTrips' } } }]),

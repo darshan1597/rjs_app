@@ -3,11 +3,14 @@ import { validate } from '../../common/middleware/validate.js';
 import { authenticateAdmin, requireEmployee } from '../admins/admin-auth.middleware.js';
 import { addBookingNote, assignDriver, eligibleDrivers, getBookingDetails, listBookings } from './booking.controller.js';
 import { assignDriverSchema, bookingActionSchema, bookingNoteSchema, listBookingsSchema } from './booking.schemas.js';
+
 const bookingRouter = express.Router();
+
 bookingRouter.use(authenticateAdmin, requireEmployee);
 bookingRouter.get('/', validate(listBookingsSchema), listBookings);
 bookingRouter.get('/:bookingId/eligible-drivers', validate(bookingActionSchema), eligibleDrivers);
 bookingRouter.get('/:bookingId', validate(bookingActionSchema), getBookingDetails);
 bookingRouter.post('/:bookingId/notes', validate(bookingNoteSchema), addBookingNote);
 bookingRouter.post('/:bookingId/assign', validate(assignDriverSchema), assignDriver);
+
 export { bookingRouter };

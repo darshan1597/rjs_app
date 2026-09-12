@@ -23,6 +23,7 @@ const superLinks = [
   ["/audit-logs", LuCircleCheck, "Audit logs"],
   ["/system-settings", LuSettings, "System settings"],
 ];
+
 const employeeLinks = [
   ["/", LuLayoutDashboard, "Dashboard"],
   ["/drivers", LuCarFront, "Drivers"],
@@ -48,10 +49,10 @@ export default function AdminLayout({ children }) {
           className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden"
         />
       )}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col overflow-hidden bg-[#071332] text-white transition-transform duration-300 lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col overflow-hidden bg-[#071332] text-white transition-transform duration-300 lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_5%,rgba(45,75,255,.24),transparent_33%),linear-gradient(180deg,transparent,rgba(0,5,22,.35))]" />
+        
         <div className="relative border-b border-white/10 px-6 py-6">
           <Brand light />
         </div>

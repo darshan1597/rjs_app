@@ -74,4 +74,27 @@ class CustomerBookingService {
     );
     return data['booking'] as Map<String, dynamic>;
   }
+
+  static Future<Map<String, dynamic>> createPaymentOrder(String bookingId) =>
+      CustomerAuthService.authorizedPost(
+        'customer/bookings/$bookingId/payment-order',
+        const {},
+      );
+
+  static Future<Map<String, dynamic>> verifyPayment({
+    required String bookingId,
+    required String paymentId,
+    required String orderId,
+    required String signature,
+  }) async {
+    final data = await CustomerAuthService.authorizedPost(
+      'customer/bookings/$bookingId/verify-payment',
+      {
+        'razorpayPaymentId': paymentId,
+        'razorpayOrderId': orderId,
+        'razorpaySignature': signature,
+      },
+    );
+    return data['booking'] as Map<String, dynamic>;
+  }
 }

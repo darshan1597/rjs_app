@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import {
-  LuArrowLeft,
-  LuCalendarDays,
-  LuCarFront,
-  LuCircleCheck,
-  LuMapPin,
-  LuPrinter,
-  LuReceiptIndianRupee,
-  LuUserRound,
+    LuArrowLeft,
+    LuCalendarDays,
+    LuCarFront,
+    LuCircleCheck,
+    LuMapPin,
+    LuPrinter,
+    LuReceiptIndianRupee,
+    LuUserRound,
 } from "react-icons/lu";
 import { useNavigate, useParams } from "react-router-dom";
 import AdminLayout from "../components/AdminLayout.jsx";

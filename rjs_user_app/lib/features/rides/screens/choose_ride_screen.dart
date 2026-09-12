@@ -9,7 +9,6 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/network/customer_auth_service.dart';
 import '../../location/screens/location_search_screen.dart';
 import '../../location/models/map_place.dart';
-import '../../schedule/screens/schedule_ride_screen.dart';
 import '../services/customer_booking_service.dart';
 import 'driver_search_screen.dart';
 
@@ -32,6 +31,7 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
   late MapPlace _destination;
   int _selectedRide = 0;
   bool _searching = false;
+  DateTime? _scheduledFor;
 
   List<_Ride> _rides = const [];
   bool _loadingRides = true;
@@ -208,6 +208,19 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
     }
   }
 
+  Future<void> _chooseSchedule() async {
+    final selected = await showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0x660A244A),
+      builder: (_) => _SchedulePickerSheet(initialValue: _scheduledFor),
+    );
+    if (selected != null && mounted) {
+      setState(() => _scheduledFor = selected);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xFFFBFCFF),
@@ -265,6 +278,8 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
             _BottomAction(
               ride: _rides[_selectedRide],
               searching: _searching,
+              scheduledFor: _scheduledFor,
+              onSchedule: _chooseSchedule,
               onContinue: _searchVehicle,
             ),
         ],
@@ -820,10 +835,14 @@ class _BottomAction extends StatelessWidget {
   const _BottomAction({
     required this.ride,
     required this.searching,
+    required this.scheduledFor,
+    required this.onSchedule,
     required this.onContinue,
   });
   final _Ride ride;
   final bool searching;
+  final DateTime? scheduledFor;
+  final VoidCallback onSchedule;
   final VoidCallback onContinue;
 
   @override
@@ -846,47 +865,56 @@ class _BottomAction extends StatelessWidget {
     ),
     child: Row(
       children: [
-        const _BottomChoice(
-          icon: Icons.person_outline_rounded,
-          label: 'Myself',
+        const Expanded(
+          flex: 2,
+          child: _BottomChoice(
+            icon: Icons.person_outline_rounded,
+            label: 'Myself',
+          ),
         ),
         const SizedBox(width: 8),
-        _BottomChoice(
-          icon: Icons.schedule_rounded,
-          label: 'Now',
-          onTap: () => Navigator.push<void>(
-            context,
-            MaterialPageRoute(builder: (_) => const ScheduleRideScreen()),
+        Expanded(
+          flex: 2,
+          child: _BottomChoice(
+            icon: Icons.schedule_rounded,
+            label: scheduledFor == null
+                ? 'Now'
+                : '${scheduledFor!.day}/${scheduledFor!.month} ${TimeOfDay.fromDateTime(scheduledFor!).format(context)}',
+            onTap: onSchedule,
           ),
         ),
         const SizedBox(width: 9),
-        SizedBox(
-          width: 164,
-          height: 54,
-          child: FilledButton(
-            onPressed: searching ? null : onContinue,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.orange,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+        Expanded(
+          flex: 5,
+          child: SizedBox(
+            height: 54,
+            child: FilledButton(
+              onPressed: searching ? null : onContinue,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.orange,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      searching ? 'Starting Search...' : 'Search ${ride.name}',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        searching
+                            ? 'Starting Search...'
+                            : 'Search ${ride.name}',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -923,6 +951,8 @@ class _BottomChoice extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: AppColors.navy,
                 fontSize: 10.5,
@@ -932,6 +962,137 @@ class _BottomChoice extends StatelessWidget {
           ],
         ),
       ),
+    ),
+  );
+}
+
+class _SchedulePickerSheet extends StatefulWidget {
+  const _SchedulePickerSheet({this.initialValue});
+
+  final DateTime? initialValue;
+
+  @override
+  State<_SchedulePickerSheet> createState() => _SchedulePickerSheetState();
+}
+
+class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
+  late DateTime _date;
+  late TimeOfDay _time;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial =
+        widget.initialValue ??
+        DateTime.now().add(const Duration(minutes: 30));
+    _date = DateTime(initial.year, initial.month, initial.day);
+    _time = TimeOfDay.fromDateTime(initial);
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: EdgeInsets.fromLTRB(
+      20,
+      12,
+      20,
+      20 + MediaQuery.paddingOf(context).bottom,
+    ),
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 44,
+          height: 5,
+          decoration: BoxDecoration(
+            color: const Color(0xFFCDD3DC),
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Schedule your ride',
+            style: TextStyle(
+              color: AppColors.navy,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        CalendarDatePicker(
+          initialDate: _date,
+          firstDate: DateTime(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+          ),
+          lastDate: DateTime.now().add(const Duration(days: 90)),
+          onDateChanged: (value) => setState(() => _date = value),
+        ),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: const CircleAvatar(
+            backgroundColor: Color(0xFFFFF1E8),
+            child: Icon(Icons.schedule_rounded, color: AppColors.orange),
+          ),
+          title: const Text(
+            'Pickup time',
+            style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w700),
+          ),
+          trailing: TextButton(
+            onPressed: () async {
+              final value = await showTimePicker(
+                context: context,
+                initialTime: _time,
+              );
+              if (value != null && mounted) setState(() => _time = value);
+            },
+            child: Text(
+              _time.format(context),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: FilledButton(
+            onPressed: () {
+              final value = DateTime(
+                _date.year,
+                _date.month,
+                _date.day,
+                _time.hour,
+                _time.minute,
+              );
+              if (value.isBefore(DateTime.now())) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please choose a future time')),
+                );
+                return;
+              }
+              Navigator.pop(context, value);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.orange,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: const Text(
+              'Confirm date & time',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+      ],
     ),
   );
 }

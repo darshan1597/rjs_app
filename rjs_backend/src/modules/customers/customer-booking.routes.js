@@ -11,6 +11,7 @@ import { Driver } from '../drivers/driver.model.js';
 import { VehicleCategory, VehicleVariant } from '../vehicles/vehicle.model.js';
 import { calculateLocalFare, fareBandFor } from '../bookings/local-fare.service.js';
 import { computeRoute } from '../maps/maps.service.js';
+import { closeQrCode, createOrder, fetchPayment, verifyCheckoutSignature } from '../payments/razorpay.service.js';
 
 const router = express.Router();
 const empty = z.object({});
@@ -36,6 +37,17 @@ const bookingIdSchema = z.object({
   params: z.object({ bookingId: id }),
   query: empty,
 });
+
+const verifyPaymentSchema = z.object({
+  body: z.object({
+    razorpayPaymentId: z.string().min(5).max(100),
+    razorpayOrderId: z.string().min(5).max(100),
+    razorpaySignature: z.string().min(20).max(200),
+  }),
+  params: z.object({ bookingId: id }),
+  query: empty,
+});
+
 const searchStatuses = ['SEARCHING_DRIVER'];
 
 async function expireDriverSearches(filter = {}) {
@@ -76,6 +88,11 @@ const toCustomerBooking = (booking) => ({
   status: booking.status,
   paymentStatus: booking.paymentStatus,
   paymentMethod: booking.paymentMethod,
+  ...booking.status === 'PAYMENT_PENDING' ? {
+    razorpayKeyId: env.RAZORPAY_KEY_ID,
+    razorpayOrderId: booking.razorpayOrderId,
+    qrImageUrl: booking.razorpayQrImageUrl,
+  } : {},
   createdAt: booking.createdAt,
   serviceType: booking.serviceType,
   timing: booking.timing,
@@ -114,15 +131,41 @@ router.get('/vehicle-catalog', validate(catalogSchema), async (req, res, next) =
       VehicleCategory.find({ isActive: true }).sort({ name: 1 }).lean(),
       VehicleVariant.find({ isActive: true, onRoadPrice: { $gt: 0 } }).sort({ name: 1 }).lean(),
       Driver.aggregate([
-        { $match: { status: 'ACTIVE', operationalStatus: 'ONLINE', serviceAssignment: { $in: ['LOCAL', 'FLEXIBLE', null] }, 'vehicle.categoryId': { $exists: true }, 'vehicle.variantId': { $exists: true } } },
-        { $group: { _id: { categoryId: '$vehicle.categoryId', variantId: '$vehicle.variantId' }, count: { $sum: 1 } } },
+        { 
+          $match: { 
+            status: 'ACTIVE', 
+            operationalStatus: 'ONLINE', 
+            serviceAssignment: { 
+              $in: ['LOCAL', 'FLEXIBLE', null] 
+            }, 
+            'vehicle.categoryId': { $exists: true }, 
+            'vehicle.variantId': { $exists: true } 
+          } 
+        },
+        { 
+          $group: { 
+            _id: { 
+              categoryId: '$vehicle.categoryId', 
+              variantId: '$vehicle.variantId' 
+            }, 
+            count: { $sum: 1 } 
+          } 
+        },
       ]),
       computeRoute({
-        origin: { latitude: pickupLatitude, longitude: pickupLongitude },
-        destination: { latitude: destinationLatitude, longitude: destinationLongitude },
+        origin: { 
+          latitude: pickupLatitude, 
+          longitude: pickupLongitude 
+        },
+        destination: { 
+          latitude: destinationLatitude, 
+          longitude: destinationLongitude 
+        },
       }),
     ]);
+
     const counts = new Map(availability.map((row) => [`${row._id.categoryId}:${row._id.variantId}`, row.count]));
+
     return res.json({ success: true, data: { categories: categories.map((category) => ({
       id: category._id, name: category.name, code: category.code, photoUrl: category.photoUrl,
       variants: variants.filter((variant) => String(variant.categoryId) === String(category._id)).map((variant) => ({
@@ -136,7 +179,9 @@ router.get('/vehicle-catalog', validate(catalogSchema), async (req, res, next) =
         temporarySeats: seats[variant.code] || 4,
       })),
     })).filter((category) => category.variants.length > 0), route } });
-  } catch (error) { return next(error); }
+  } catch (error) { 
+    return next(error); 
+  }
 });
 
 router.post('/', validate(createSchema), async (req, res, next) => {
@@ -144,16 +189,33 @@ router.post('/', validate(createSchema), async (req, res, next) => {
     const { pickupAddress, destinationAddress, pickupLatitude, pickupLongitude,
       destinationLatitude, destinationLongitude, categoryId, variantId, paymentMethod } =
       req.validated.body;
+
     const [category, variant] = await Promise.all([
       VehicleCategory.findOne({ _id: categoryId, isActive: true }),
       VehicleVariant.findOne({ _id: variantId, categoryId, isActive: true, onRoadPrice: { $gt: 0 } }),
     ]);
+
     if (!category || !variant) throw new AppError(422, 'VEHICLE_UNAVAILABLE', 'This vehicle option is no longer available');
-    const availableDriver = await Driver.exists({ status: 'ACTIVE', operationalStatus: 'ONLINE', serviceAssignment: { $in: ['LOCAL', 'FLEXIBLE', null] }, 'vehicle.categoryId': categoryId, 'vehicle.variantId': variantId });
+
+    const availableDriver = await Driver.exists({ 
+      status: 'ACTIVE', 
+      operationalStatus: 'ONLINE', 
+      serviceAssignment: { $in: ['LOCAL', 'FLEXIBLE', null] }, 
+      'vehicle.categoryId': categoryId, 
+      'vehicle.variantId': variantId 
+    });
+
     if (!availableDriver) throw new AppError(409, 'NO_DRIVER_AVAILABLE', `No ${variant.name} driver is currently available`);
+
     const route = await computeRoute({
-      origin: { latitude: pickupLatitude, longitude: pickupLongitude },
-      destination: { latitude: destinationLatitude, longitude: destinationLongitude },
+      origin: { 
+        latitude: pickupLatitude, 
+        longitude: pickupLongitude 
+      },
+      destination: { 
+        latitude: destinationLatitude, 
+        longitude: destinationLongitude 
+      },
     });
     const start = new Date();
     const end = new Date(start.getTime() + Math.max(route.durationMinutes, 15) * 60 * 1000);
@@ -169,8 +231,16 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       customer: { name: req.customer.name, phone: req.customer.phone },
       serviceType: 'IMMEDIATE_RIDE',
       timing: 'IMMEDIATE',
-      pickup: { address: pickupAddress, latitude: pickupLatitude, longitude: pickupLongitude },
-      destination: { address: destinationAddress, latitude: destinationLatitude, longitude: destinationLongitude },
+      pickup: { 
+        address: pickupAddress, 
+        latitude: pickupLatitude, 
+        longitude: pickupLongitude 
+      },
+      destination: { 
+        address: destinationAddress, 
+        latitude: destinationLatitude, 
+        longitude: destinationLongitude 
+      },
       durationMinutes: route.durationMinutes,
       estimatedDistanceKm,
       passengerCount: seats[variant.code] || 4,
@@ -187,7 +257,10 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       status: 'SEARCHING_DRIVER',
       assignmentDeadline: new Date(Date.now() + 45 * 1000),
       statusHistory: [
-        { status: 'SEARCHING_DRIVER', note: 'Searching for a nearby driver' },
+        { 
+          status: 'SEARCHING_DRIVER', 
+          note: 'Searching for a nearby driver' 
+        },
       ],
     });
 
@@ -222,19 +295,117 @@ router.get('/:bookingId', validate(bookingIdSchema), async (req, res, next) => {
       _id: req.validated.params.bookingId,
       customerId: req.customer.id,
     });
+
     const booking = await Booking.findOne({
       _id: req.validated.params.bookingId,
       customerId: req.customer.id,
     }).select('+tripStartOtp').populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle');
+
     if (!booking) {
       throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking was not found');
     }
+
     return res.json({
       success: true,
       data: { booking: toCustomerBooking(booking) },
     });
   } catch (error) {
     return next(error);
+  }
+});
+
+router.post('/:bookingId/payment-order', validate(bookingIdSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.validated.params.bookingId,
+      customerId: req.customer.id,
+      status: 'PAYMENT_PENDING',
+      paymentStatus: 'PENDING',
+    });
+
+    if (!booking) throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'The final trip bill is not ready for payment');
+
+    if (!booking.razorpayOrderId) {
+      const order = await createOrder(booking);
+      booking.razorpayOrderId = order.id;
+      await booking.save();
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        keyId: env.RAZORPAY_KEY_ID,
+        orderId: booking.razorpayOrderId,
+        amountPaise: Math.round(booking.totalAmount * 100),
+        currency: 'INR',
+        name: 'RJS Tours and Travels',
+        description: `Payment for ${booking.bookingNumber}`,
+        customer: booking.customer,
+      },
+    });
+  } catch (error) { return next(error); }
+});
+
+router.post('/:bookingId/verify-payment', validate(verifyPaymentSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.validated.params.bookingId,
+      customerId: req.customer.id,
+      status: 'PAYMENT_PENDING',
+      paymentStatus: 'PENDING',
+    });
+
+    if (!booking || booking.razorpayOrderId !== req.validated.body.razorpayOrderId) {
+      throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'This payment order is no longer active');
+    }
+
+    const authentic = verifyCheckoutSignature({
+      orderId: booking.razorpayOrderId,
+      paymentId: req.validated.body.razorpayPaymentId,
+      signature: req.validated.body.razorpaySignature,
+    });
+
+    if (!authentic) throw new AppError(400, 'INVALID_PAYMENT_SIGNATURE', 'Payment verification failed');
+
+    const gatewayPayment = await fetchPayment(req.validated.body.razorpayPaymentId);
+    if (gatewayPayment.status !== 'captured'
+        || gatewayPayment.order_id !== booking.razorpayOrderId
+        || gatewayPayment.amount !== Math.round(booking.totalAmount * 100)) {
+      throw new AppError(409, 'PAYMENT_NOT_CAPTURED', 'Payment is still processing; it will update automatically');
+    }
+
+    await Payment.findOneAndUpdate(
+      { bookingId: booking._id },
+      { $set: {
+        transactionId: gatewayPayment.id,
+        razorpayPaymentId: gatewayPayment.id,
+        razorpayOrderId: gatewayPayment.order_id,
+        gatewayReference: gatewayPayment.id,
+        method: gatewayPayment.method === 'upi' ? 'UPI' : 'CARD',
+        methodDisplay: `Razorpay ${gatewayPayment.method}`,
+        amount: booking.totalAmount,
+        status: 'PAID',
+        paidAt: new Date(),
+        customerName: booking.customer.name,
+        customerPhone: booking.customer.phone,
+        bookingType: booking.serviceType,
+      }},
+      { upsert: true, new: true, runValidators: true },
+    );
+
+    booking.status = 'COMPLETED';
+    booking.paymentStatus = 'PAID';
+    booking.paymentMethod = gatewayPayment.method === 'upi' ? 'UPI' : 'CARD';
+    booking.statusHistory.push({ status: 'COMPLETED', note: 'Razorpay payment verified and captured' });
+
+    await booking.save();
+
+    if (booking.razorpayQrCodeId) await closeQrCode(booking.razorpayQrCodeId).catch(() => {});
+
+    await Driver.updateOne({ _id: booking.currentDriverId }, { $set: { operationalStatus: 'ONLINE' } });
+    return res.json({ success: true, data: { booking: toCustomerBooking(booking) } });
+  } catch (error) { 
+    return next(error); 
   }
 });
 
@@ -270,9 +441,11 @@ router.post('/:bookingId/retry-search', validate(bookingIdSchema), async (req, r
         'vehicle.variantId': existing.vehicleVariantId,
       }),
     ]);
+
     if (!category || !variant) {
       throw new AppError(422, 'VEHICLE_UNAVAILABLE', 'This vehicle option is no longer available');
     }
+
     if (!availableDriver) {
       throw new AppError(409, 'NO_DRIVER_AVAILABLE', `No ${variant.name} driver is currently available`);
     }
@@ -302,7 +475,9 @@ router.post('/:bookingId/confirm-test-payment', validate(bookingIdSchema), async
       },
       { new: true, runValidators: true },
     ).populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle');
+
     if (!booking) throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'This booking is not waiting for payment');
+
     await Payment.create({
       transactionId: `DEV-${booking.bookingNumber}`,
       bookingId: booking.id,
@@ -316,47 +491,44 @@ router.post('/:bookingId/confirm-test-payment', validate(bookingIdSchema), async
       status: 'PAID',
       paidAt: new Date(),
     });
+
     return res.json({ success: true, data: { booking: toCustomerBooking(booking) } });
   } catch (error) { return next(error); }
 });
 
-router.post(
-  '/:bookingId/cancel',
-  validate(bookingIdSchema),
-  async (req, res, next) => {
-    try {
-      const booking = await Booking.findOneAndUpdate(
-        {
-          _id: req.validated.params.bookingId,
-          customerId: req.customer.id,
-          status: { $in: ['SEARCHING_DRIVER', 'DRIVER_ACCEPTED', 'AWAITING_PAYMENT', 'NO_DRIVER_AVAILABLE'] },
-        },
-        {
-          $set: { status: 'CANCELLED' },
-          $push: {
-            statusHistory: {
-              status: 'CANCELLED',
-              note: 'Cancelled by customer before payment',
-            },
+router.post('/:bookingId/cancel', validate(bookingIdSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOneAndUpdate(
+      {
+        _id: req.validated.params.bookingId,
+        customerId: req.customer.id,
+        status: { $in: ['SEARCHING_DRIVER', 'DRIVER_ACCEPTED', 'AWAITING_PAYMENT', 'NO_DRIVER_AVAILABLE'] },
+      },
+      {
+        $set: { status: 'CANCELLED' },
+        $push: {
+          statusHistory: {
+            status: 'CANCELLED',
+            note: 'Cancelled by customer before payment',
           },
         },
-        { new: true, runValidators: true },
+      },
+      { new: true, runValidators: true },
+    );
+    if (!booking) {
+      throw new AppError(
+        409,
+        'BOOKING_CANNOT_BE_CANCELLED',
+        'This booking can no longer be cancelled',
       );
-      if (!booking) {
-        throw new AppError(
-          409,
-          'BOOKING_CANNOT_BE_CANCELLED',
-          'This booking can no longer be cancelled',
-        );
-      }
-      return res.json({
-        success: true,
-        data: { booking: toCustomerBooking(booking) },
-      });
-    } catch (error) {
-      return next(error);
     }
-  },
-);
+    return res.json({
+      success: true,
+      data: { booking: toCustomerBooking(booking) },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 export { router as customerBookingRouter };

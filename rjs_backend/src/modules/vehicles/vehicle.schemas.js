@@ -8,6 +8,7 @@ const entityBody = z.object({
   photoUrl,
   isActive: z.boolean().optional(),
 });
+
 const paging = z.object({ page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().min(1).max(100).default(12), search: z.string().trim().max(100).optional() });
 const createCategorySchema = z.object({ body: entityBody, params: empty, query: empty });
 const listCategoriesSchema = z.object({ body: z.unknown().optional(), params: empty, query: paging });
@@ -18,6 +19,7 @@ const createVariantSchema = z.object({
   params: z.object({ categoryId: objectId }),
   query: empty,
 });
+
 const listVariantsSchema = z.object({ body: z.unknown().optional(), params: z.object({ categoryId: objectId }), query: paging });
 const updateVariantStatusSchema = z.object({ body: z.object({ isActive: z.boolean() }), params: z.object({ categoryId: objectId, variantId: objectId }), query: empty });
 const updateVariantPriceSchema = z.object({
@@ -25,4 +27,5 @@ const updateVariantPriceSchema = z.object({
   params: z.object({ categoryId: objectId, variantId: objectId }),
   query: empty,
 });
+
 export { categoryParamsSchema, createCategorySchema, createVariantSchema, listCategoriesSchema, listVariantsSchema, updateCategoryStatusSchema, updateVariantPriceSchema, updateVariantStatusSchema };

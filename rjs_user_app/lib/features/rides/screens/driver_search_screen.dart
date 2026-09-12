@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../services/customer_booking_service.dart';
@@ -46,6 +47,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   bool _paying = false;
   bool _timedOut = false;
   bool _refreshInFlight = false;
+  late final Razorpay _razorpay;
 
   List<String> get _messages => [
     'Looking for nearby ${widget.vehicleName} drivers...',
@@ -59,6 +61,9 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _booking = widget.booking;
+    _razorpay = Razorpay()
+      ..on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess)
+      ..on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
     _searchProgress =
         AnimationController(vsync: this, duration: const Duration(seconds: 45))
           ..addStatusListener((status) {
@@ -84,6 +89,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     _searchProgress.dispose();
     _messageTimer?.cancel();
     _poller?.cancel();
+    _razorpay.clear();
     super.dispose();
   }
 
@@ -105,6 +111,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     'DRIVER_EN_ROUTE',
     'ARRIVED',
     'IN_PROGRESS',
+    'PAYMENT_PENDING',
     'COMPLETED',
   }.contains(_status);
 
@@ -123,6 +130,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
           'DRIVER_EN_ROUTE',
           'ARRIVED',
           'IN_PROGRESS',
+          'PAYMENT_PENDING',
           'COMPLETED',
         }.contains(status);
         setState(() {
@@ -219,14 +227,24 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     }
   }
 
-  Future<void> _confirmTestPayment() async {
+  Future<void> _payNow() async {
     if (_paying) return;
     setState(() => _paying = true);
     try {
-      final booking = await CustomerBookingService.confirmTestPayment(
-        _bookingId,
-      );
-      if (mounted) setState(() => _booking = booking);
+      final order = await CustomerBookingService.createPaymentOrder(_bookingId);
+      _razorpay.open({
+        'key': order['keyId'],
+        'order_id': order['orderId'],
+        'amount': order['amountPaise'],
+        'currency': order['currency'],
+        'name': order['name'],
+        'description': order['description'],
+        'prefill': {
+          'contact': order['customer']?['phone'],
+          'name': order['customer']?['name'],
+        },
+        'theme': {'color': '#F58220'},
+      });
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -235,9 +253,36 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
           ),
         );
       }
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
+  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+    try {
+      final booking = await CustomerBookingService.verifyPayment(
+        bookingId: _bookingId,
+        paymentId: response.paymentId ?? '',
+        orderId: response.orderId ?? '',
+        signature: response.signature ?? '',
+      );
+      if (mounted) setState(() => _booking = booking);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
     } finally {
       if (mounted) setState(() => _paying = false);
     }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    if (!mounted) return;
+    setState(() => _paying = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(response.message ?? 'Payment was not completed')),
+    );
   }
 
   void _handleBack() {
@@ -249,11 +294,11 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   }
 
   String get _mapStatusMessage => switch (_status) {
-    'AWAITING_PAYMENT' => 'Driver found! Confirm payment to continue.',
-    'PAYMENT_CONFIRMED' => 'Payment confirmed. Waiting for your driver.',
+    'DRIVER_ACCEPTED' => 'Driver found and heading to your pickup.',
     'DRIVER_EN_ROUTE' => 'Your driver is on the way to you.',
     'ARRIVED' => 'Your driver has arrived at the pickup.',
     'IN_PROGRESS' => 'Trip in progress. Have a safe journey!',
+    'PAYMENT_PENDING' => 'Trip complete. Please pay the final bill.',
     'COMPLETED' => 'You have reached your destination.',
     'NO_DRIVER_AVAILABLE' => 'No driver accepted the ride in time.',
     _ => _timedOut
@@ -420,6 +465,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                 vehicleImage: widget.vehicleImage,
                 seats: widget.seats,
                 amount: _amount,
+                pricing: _booking['pricing'] as Map<String, dynamic>?,
                 progress: _searchProgress,
                 message: _messages[_messageIndex],
                 accepted: _accepted,
@@ -431,7 +477,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                 paying: _paying,
                 onCancel: _cancel,
                 onRetry: _retry,
-                onPay: _confirmTestPayment,
+                onPay: _payNow,
               ),
             ],
           ),
@@ -533,6 +579,7 @@ class _SearchPanel extends StatelessWidget {
     required this.vehicleImage,
     required this.seats,
     required this.amount,
+    required this.pricing,
     required this.progress,
     required this.message,
     required this.accepted,
@@ -550,6 +597,7 @@ class _SearchPanel extends StatelessWidget {
   final String vehicleImage;
   final String seats;
   final int amount;
+  final Map<String, dynamic>? pricing;
   final Animation<double> progress;
   final String message;
   final bool accepted;
@@ -564,21 +612,21 @@ class _SearchPanel extends StatelessWidget {
   final VoidCallback onPay;
 
   String get title => switch (status) {
-    'AWAITING_PAYMENT' => 'Driver found',
-    'PAYMENT_CONFIRMED' => 'Payment confirmed',
+    'DRIVER_ACCEPTED' => 'Driver found',
     'DRIVER_EN_ROUTE' => 'Driver is on the way',
     'ARRIVED' => 'Driver has arrived',
     'IN_PROGRESS' => 'Trip in progress',
+    'PAYMENT_PENDING' => 'Final payment due',
     'COMPLETED' => 'Ride completed',
     _ => timedOut ? 'Search timed out' : 'Searching for a driver',
   };
 
   String get subtitle => switch (status) {
-    'AWAITING_PAYMENT' => 'Confirm payment to send the driver to your pickup',
-    'PAYMENT_CONFIRMED' => 'Your driver is preparing to leave',
+    'DRIVER_ACCEPTED' => 'Your driver is preparing to leave',
     'DRIVER_EN_ROUTE' => 'Your driver is travelling to your pickup',
     'ARRIVED' => 'Share the trip OTP with your driver',
     'IN_PROGRESS' => 'You are travelling to your destination',
+    'PAYMENT_PENDING' => 'Review the final charges and complete payment',
     'COMPLETED' => 'Thank you for riding with RJS',
     _ => timedOut
         ? 'No nearby driver accepted within the search time'
@@ -771,14 +819,14 @@ class _SearchPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   accepted
-                      ? status == 'AWAITING_PAYMENT'
-                          ? 'Your driver accepted. Confirm the test payment before the driver starts toward you.'
-                          : status == 'PAYMENT_CONFIRMED'
-                          ? 'Payment is confirmed. Your driver can now begin travelling to the pickup.'
+                      ? status == 'DRIVER_ACCEPTED'
+                          ? 'Your driver accepted and can now begin travelling to the pickup.'
                           : status == 'ARRIVED'
                           ? 'Your driver has arrived. Share the OTP only when you are ready to begin.'
                           : status == 'IN_PROGRESS'
                           ? 'Your trip has started. Have a safe journey.'
+                          : status == 'PAYMENT_PENDING'
+                          ? 'Your final bill is ready. Pay now or scan the QR shown by your driver.'
                           : status == 'COMPLETED'
                           ? 'This ride has been completed successfully.'
                           : 'Your driver is travelling to your pickup location.'
@@ -816,17 +864,39 @@ class _SearchPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
+        if (status == 'PAYMENT_PENDING' && pricing != null) ...[
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE1E6ED)),
+            ),
+            child: Column(
+              children: [
+                _BillRow(label: 'Ride fare', value: pricing!['distanceFare']),
+                _BillRow(label: 'Waiting charge', value: pricing!['waitingCharge']),
+                _BillRow(label: 'Parking', value: pricing!['parkingCharge']),
+                _BillRow(label: 'Toll', value: pricing!['tollCharge']),
+                _BillRow(label: 'GST', value: pricing!['gstAmount']),
+                const Divider(),
+                _BillRow(label: 'Total payable', value: amount, strong: true),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         SizedBox(
           width: double.infinity,
           height: 48,
-          child: status == 'AWAITING_PAYMENT'
+          child: status == 'PAYMENT_PENDING'
               ? FilledButton(
                   onPressed: paying ? null : onPay,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.orange,
                   ),
                   child: Text(
-                    paying ? 'Confirming...' : 'Confirm Test Payment  •  ₹$amount',
+                    paying ? 'Opening Razorpay...' : 'Pay Now  •  ₹$amount',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 )
@@ -838,8 +908,8 @@ class _SearchPanel extends StatelessWidget {
                     disabledForegroundColor: const Color(0xFF079447),
                   ),
                   child: Text(
-                    status == 'PAYMENT_CONFIRMED'
-                        ? 'Payment Confirmed • Waiting for Driver'
+                    status == 'DRIVER_ACCEPTED'
+                        ? 'Driver Accepted'
                         : status == 'DRIVER_EN_ROUTE'
                         ? 'Driver Is On The Way'
                         : status == 'ARRIVED'
@@ -895,22 +965,38 @@ class _SearchPanel extends StatelessWidget {
   );
 }
 
+class _BillRow extends StatelessWidget {
+  const _BillRow({required this.label, required this.value, this.strong = false});
+  final String label;
+  final Object? value;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(child: Text(label, style: TextStyle(color: strong ? AppColors.navy : AppColors.muted, fontWeight: strong ? FontWeight.w900 : FontWeight.w500))),
+        Text('₹${value ?? 0}', style: TextStyle(color: AppColors.navy, fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
+      ],
+    ),
+  );
+}
+
 class _Progress extends StatelessWidget {
   const _Progress({required this.status});
   final String status;
 
   bool get driverFound => status != 'SEARCHING_DRIVER';
-  bool get paid => const {
-    'PAYMENT_CONFIRMED',
+  bool get rideStarted => const {
     'DRIVER_EN_ROUTE',
     'ARRIVED',
     'IN_PROGRESS',
+    'PAYMENT_PENDING',
     'COMPLETED',
   }.contains(status);
-  bool get onTheWay => const {
-    'DRIVER_EN_ROUTE',
-    'ARRIVED',
-    'IN_PROGRESS',
+  bool get paymentReady => const {
+    'PAYMENT_PENDING',
     'COMPLETED',
   }.contains(status);
 
@@ -920,10 +1006,13 @@ class _Progress extends StatelessWidget {
       _Step(label: 'Searching', active: true),
       _Line(active: driverFound),
       _Step(label: 'Driver found', active: driverFound),
-      _Line(active: paid),
-      _Step(label: 'Payment', active: paid),
-      _Line(active: onTheWay),
-      _Step(label: status == 'COMPLETED' ? 'Completed' : 'On the way', active: onTheWay),
+      _Line(active: rideStarted),
+      _Step(label: 'Ride', active: rideStarted),
+      _Line(active: paymentReady),
+      _Step(
+        label: status == 'COMPLETED' ? 'Paid' : 'Payment',
+        active: paymentReady,
+      ),
     ],
   );
 }

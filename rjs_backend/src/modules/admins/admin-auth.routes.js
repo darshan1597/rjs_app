@@ -6,7 +6,9 @@ import { authenticateAdmin } from './admin-auth.middleware.js';
 import { challengeSchema, changePasswordSchema, loginSchema, mfaVerificationSchema, refreshTokenSchema, setupVerificationSchema } from './admin-auth.schemas.js';
 
 const adminAuthRouter = express.Router();
+
 const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 10, standardHeaders: 'draft-8' });
+
 adminAuthRouter.post('/login', loginLimiter, validate(loginSchema), login);
 adminAuthRouter.post('/mfa/setup', loginLimiter, validate(challengeSchema), setupMfa);
 adminAuthRouter.post('/mfa/setup/verify', loginLimiter, validate(setupVerificationSchema), verifyMfaSetup);
@@ -16,4 +18,5 @@ adminAuthRouter.post('/logout', validate(refreshTokenSchema), logout);
 adminAuthRouter.get('/me', authenticateAdmin, me);
 adminAuthRouter.post('/change-password', authenticateAdmin, validate(changePasswordSchema), changePassword);
 adminAuthRouter.post('/logout-all', authenticateAdmin, logoutAll);
+
 export { adminAuthRouter };

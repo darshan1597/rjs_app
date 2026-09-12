@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DriverApiException implements Exception {
@@ -202,7 +203,23 @@ class DriverApiService {
   }
 
   static Future<Map<String, dynamic>> markArrived(String bookingId) async {
-    final data = await post('driver/trips/$bookingId/arrive');
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw Exception('Turn on device location before marking arrived');
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      throw Exception('Location permission is required to mark arrived');
+    }
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+    final data = await post('driver/trips/$bookingId/arrive', {
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+    });
     return data['trip'] as Map<String, dynamic>;
   }
 
@@ -214,8 +231,15 @@ class DriverApiService {
     return data['trip'] as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> completeTrip(String bookingId) async {
-    final data = await post('driver/trips/$bookingId/complete');
+  static Future<Map<String, dynamic>> completeTrip(
+    String bookingId, {
+    required double parkingCharge,
+    required double tollCharge,
+  }) async {
+    final data = await post('driver/trips/$bookingId/complete', {
+      'parkingCharge': parkingCharge,
+      'tollCharge': tollCharge,
+    });
     return data['trip'] as Map<String, dynamic>;
   }
 }

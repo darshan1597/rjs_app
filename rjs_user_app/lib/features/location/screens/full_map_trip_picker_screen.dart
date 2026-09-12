@@ -23,6 +23,8 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
   MapPlace? _pickup;
   MapPlace? _destination;
   bool _loadingPickup = true;
+  bool _loadingRoute = false;
+  List<LatLng> _routePoints = const [];
 
   @override
   void initState() {
@@ -55,7 +57,7 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
     );
     if (selected == null || !mounted) return;
     setState(() => _pickup = selected);
-    await _showSelectedPlaces();
+    await _refreshRoute();
   }
 
   Future<void> _chooseDestination() async {
@@ -70,7 +72,42 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
     );
     if (selected == null || !mounted) return;
     setState(() => _destination = selected);
-    await _showSelectedPlaces();
+    await _refreshRoute();
+  }
+
+  Future<void> _refreshRoute() async {
+    final pickup = _pickup;
+    final destination = _destination;
+    if (pickup == null || destination == null) {
+      setState(() => _routePoints = const []);
+      await _showSelectedPlaces();
+      return;
+    }
+    setState(() => _loadingRoute = true);
+    try {
+      final route = await MapsService.route(
+        origin: pickup,
+        destination: destination,
+      );
+      if (!mounted) return;
+      setState(() {
+        _routePoints = _decodePolyline(
+          route['encodedPolyline']?.toString() ?? '',
+        );
+      });
+      await _showSelectedPlaces();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await _showSelectedPlaces();
+    } finally {
+      if (mounted) setState(() => _loadingRoute = false);
+    }
   }
 
   Future<void> _showSelectedPlaces() async {
@@ -88,18 +125,22 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
       return;
     }
 
-    final south = pickup.latitude < destination.latitude
-        ? pickup.latitude
-        : destination.latitude;
-    final north = pickup.latitude > destination.latitude
-        ? pickup.latitude
-        : destination.latitude;
-    final west = pickup.longitude < destination.longitude
-        ? pickup.longitude
-        : destination.longitude;
-    final east = pickup.longitude > destination.longitude
-        ? pickup.longitude
-        : destination.longitude;
+    final boundsPoints = _routePoints.isEmpty
+        ? [
+            LatLng(pickup.latitude, pickup.longitude),
+            LatLng(destination.latitude, destination.longitude),
+          ]
+        : _routePoints;
+    var south = boundsPoints.first.latitude;
+    var north = boundsPoints.first.latitude;
+    var west = boundsPoints.first.longitude;
+    var east = boundsPoints.first.longitude;
+    for (final point in boundsPoints.skip(1)) {
+      if (point.latitude < south) south = point.latitude;
+      if (point.latitude > north) north = point.latitude;
+      if (point.longitude < west) west = point.longitude;
+      if (point.longitude > east) east = point.longitude;
+    }
     await controller.animateCamera(
       CameraUpdate.newLatLngBounds(
         LatLngBounds(
@@ -109,6 +150,56 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
         82,
       ),
     );
+  }
+
+  Future<void> _handleLocationButton() async {
+    if (_pickup != null && _destination != null) {
+      await _showSelectedPlaces();
+      return;
+    }
+    try {
+      final current = await MapsService.currentPlace();
+      if (!mounted) return;
+      setState(() => _pickup = current);
+      await _controller?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(current.latitude, current.longitude),
+          16,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    var index = 0, latitude = 0, longitude = 0;
+    while (index < encoded.length) {
+      var shift = 0, result = 0, byte = 0;
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+      latitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      shift = 0;
+      result = 0;
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+      longitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      points.add(LatLng(latitude / 1e5, longitude / 1e5));
+    }
+    return points;
   }
 
   void _continue() {
@@ -157,7 +248,20 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
                 target: _bengaluru,
                 zoom: 12.5,
               ),
+              padding: EdgeInsets.only(
+                bottom: 278 + MediaQuery.paddingOf(context).bottom,
+              ),
               markers: markers,
+              polylines: _routePoints.isEmpty
+                  ? {}
+                  : {
+                      Polyline(
+                        polylineId: const PolylineId('selected-route'),
+                        points: _routePoints,
+                        color: AppColors.blue,
+                        width: 6,
+                      ),
+                    },
               compassEnabled: false,
               mapToolbarEnabled: false,
               myLocationButtonEnabled: false,
@@ -187,12 +291,7 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
             bottom: 294 + MediaQuery.paddingOf(context).bottom,
             child: _CircleButton(
               icon: Icons.my_location_rounded,
-              onTap: () async {
-                final current = await MapsService.currentPlace();
-                if (!mounted) return;
-                setState(() => _pickup = current);
-                await _showSelectedPlaces();
-              },
+              onTap: _handleLocationButton,
             ),
           ),
           Positioned(
@@ -261,7 +360,9 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
                       width: double.infinity,
                       height: 54,
                       child: FilledButton(
-                        onPressed: pickup != null && destination != null
+                        onPressed: pickup != null &&
+                                destination != null &&
+                                !_loadingRoute
                             ? _continue
                             : null,
                         style: FilledButton.styleFrom(

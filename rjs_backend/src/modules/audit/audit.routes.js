@@ -5,6 +5,7 @@ import { listAuditLogs } from './audit.controller.js';
 import { auditListSchema } from './audit.schemas.js';
 
 const auditRouter = express.Router();
+
 auditRouter.get('/', authenticateAdmin, requirePermission('audit_logs.view'), validate(auditListSchema), listAuditLogs);
 
 export { auditRouter };

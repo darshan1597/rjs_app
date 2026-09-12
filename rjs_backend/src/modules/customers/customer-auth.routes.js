@@ -1,11 +1,313 @@
-import crypto from'node:crypto';import express from'express';import jwt from'jsonwebtoken';import{z}from'zod';import{validate}from'../../common/middleware/validate.js';import{AppError}from'../../common/errors/app-error.js';import{env}from'../../config/env.js';import{hashToken,signCustomerAccessToken,signCustomerRefreshToken,verifyCustomerRefreshToken}from'../../common/security/tokens.js';import{Customer,CustomerOtp,CustomerSession}from'./customer.model.js';import{authenticateCustomer}from'./customer-auth.middleware.js';
-const router=express.Router();const empty=z.object({});const phone=z.string().trim().regex(/^\d{10}$/);const requestSchema=z.object({body:z.object({phone}),params:empty,query:empty});const verifySchema=z.object({body:z.object({phone,otp:z.string().regex(/^\d{6}$/)}),params:empty,query:empty});const profileFields=z.object({name:z.string().trim().min(2).max(100),email:z.union([z.string().trim().email(),z.literal('')]).optional()});const completeSchema=z.object({body:z.object({registrationToken:z.string().min(20),...profileFields.shape}),params:empty,query:empty});const updateProfileSchema=z.object({body:profileFields,params:empty,query:empty});const refreshSchema=z.object({body:z.object({refreshToken:z.string().min(20)}),params:empty,query:empty});
-async function createSession(customer,req){const session=new CustomerSession({customerId:customer.id,refreshTokenHash:'pending',expiresAt:new Date(Date.now()+env.CUSTOMER_SESSION_TTL_DAYS*86400000),userAgent:req.get('user-agent'),ip:req.ip});await session.save();const refreshToken=signCustomerRefreshToken(customer.id,session.id);session.refreshTokenHash=hashToken(refreshToken);await session.save();return{customer:{id:customer.id,phone:customer.phone,name:customer.name,email:customer.email},tokens:{accessToken:signCustomerAccessToken(customer,session.id),refreshToken}}}
-router.post('/request-otp',validate(requestSchema),async(req,res,next)=>{try{const normalized=`+91${req.validated.body.phone}`;await CustomerOtp.updateMany({phone:normalized,consumedAt:null},{consumedAt:new Date()});const challenge=await CustomerOtp.create({phone:normalized,expiresAt:new Date(Date.now()+5*60000)});return res.json({success:true,data:{challengeId:challenge.id,expiresInSeconds:300,...env.NODE_ENV!=='production'&&{devOtp:env.DEV_FIXED_OTP}}})}catch(e){return next(e)}});
-router.post('/verify-otp',validate(verifySchema),async(req,res,next)=>{try{const normalized=`+91${req.validated.body.phone}`;const challenge=await CustomerOtp.findOne({phone:normalized,consumedAt:null,expiresAt:{$gt:new Date()}}).sort({createdAt:-1});if(!challenge)throw new AppError(400,'OTP_EXPIRED','Request a new OTP');challenge.attempts+=1;if(challenge.attempts>5){challenge.consumedAt=new Date();await challenge.save();throw new AppError(429,'OTP_ATTEMPTS_EXCEEDED','Request a new OTP')}if(req.validated.body.otp!==env.DEV_FIXED_OTP){await challenge.save();throw new AppError(400,'INVALID_OTP','The OTP is incorrect')}challenge.consumedAt=new Date();await challenge.save();const customer=await Customer.findOne({phone:normalized});if(customer?.status==='BLOCKED')throw new AppError(403,'CUSTOMER_BLOCKED','This account is unavailable');if(customer?.profileCompleted){customer.lastLoginAt=new Date();await customer.save();return res.json({success:true,data:{isNewCustomer:false,...await createSession(customer,req)}})}const registrationToken=jwt.sign({phone:normalized,nonce:crypto.randomUUID(),purpose:'customer_registration'},env.ACCESS_TOKEN_SECRET,{expiresIn:'15m',issuer:'rjs-backend',audience:'rjs-customer-registration'});return res.json({success:true,data:{isNewCustomer:true,registrationToken,phone:normalized}})}catch(e){return next(e)}});
-router.post('/complete-profile',validate(completeSchema),async(req,res,next)=>{try{let payload;try{payload=jwt.verify(req.validated.body.registrationToken,env.ACCESS_TOKEN_SECRET,{issuer:'rjs-backend',audience:'rjs-customer-registration'})}catch{throw new AppError(401,'INVALID_REGISTRATION_TOKEN','Verify the phone number again')}if(payload.purpose!=='customer_registration')throw new AppError(401,'INVALID_REGISTRATION_TOKEN','Verify the phone number again');const customer=await Customer.findOneAndUpdate({phone:payload.phone},{$set:{name:req.validated.body.name,email:req.validated.body.email||undefined,profileCompleted:true,lastLoginAt:new Date()}}, {new:true,upsert:true,runValidators:true,setDefaultsOnInsert:true});return res.status(201).json({success:true,data:await createSession(customer,req)})}catch(e){return next(e)}});
-router.post('/refresh',validate(refreshSchema),async(req,res,next)=>{try{const token=req.validated.body.refreshToken;let payload;try{payload=verifyCustomerRefreshToken(token)}catch{throw new AppError(401,'INVALID_REFRESH_TOKEN','The refresh token is invalid or expired')}if(payload.tokenType!=='refresh'||payload.actorType!=='customer')throw new AppError(401,'INVALID_REFRESH_TOKEN','The refresh token is invalid or expired');const session=await CustomerSession.findById(payload.sid).select('+refreshTokenHash');if(!session||session.revokedAt||session.expiresAt<=new Date()||session.refreshTokenHash!==hashToken(token))throw new AppError(401,'INVALID_REFRESH_TOKEN','The refresh token is invalid or expired');const customer=await Customer.findById(payload.sub);if(!customer||customer.status!=='ACTIVE'||!customer.profileCompleted)throw new AppError(401,'ACCOUNT_UNAVAILABLE','The customer account is unavailable');const refreshToken=signCustomerRefreshToken(customer.id,session.id);session.refreshTokenHash=hashToken(refreshToken);await session.save();return res.json({success:true,data:{customer:{id:customer.id,phone:customer.phone,name:customer.name,email:customer.email},tokens:{accessToken:signCustomerAccessToken(customer,session.id),refreshToken}}})}catch(e){return next(e)}});
-router.post('/logout',validate(refreshSchema),async(req,res,next)=>{try{try{const payload=verifyCustomerRefreshToken(req.validated.body.refreshToken);await CustomerSession.findByIdAndUpdate(payload.sid,{revokedAt:new Date()})}catch{/* Logout is intentionally idempotent. */}return res.json({success:true,data:{loggedOut:true}})}catch(e){return next(e)}});
-router.get('/me',authenticateCustomer,(req,res)=>res.json({success:true,data:{customer:{id:req.customer.id,phone:req.customer.phone,name:req.customer.name,email:req.customer.email}}}));
-router.patch('/me',authenticateCustomer,validate(updateProfileSchema),async(req,res,next)=>{try{req.customer.name=req.validated.body.name;if(req.validated.body.email)req.customer.email=req.validated.body.email;else req.customer.email=undefined;await req.customer.save();return res.json({success:true,data:{customer:{id:req.customer.id,phone:req.customer.phone,name:req.customer.name,email:req.customer.email}}})}catch(e){return next(e)}});
-export{router as customerAuthRouter};
+import crypto from "node:crypto";
+import express from "express";
+import jwt from "jsonwebtoken";
+import { z } from "zod";
+import { validate } from "../../common/middleware/validate.js";
+import { AppError } from "../../common/errors/app-error.js";
+import { env } from "../../config/env.js";
+import {
+    hashToken,
+    signCustomerAccessToken,
+    signCustomerRefreshToken,
+    verifyCustomerRefreshToken,
+} from "../../common/security/tokens.js";
+import { Customer, CustomerOtp, CustomerSession } from "./customer.model.js";
+import { authenticateCustomer } from "./customer-auth.middleware.js";
+
+const router = express.Router();
+const empty = z.object({});
+const phone = z.string().trim().regex(/^\d{10}$/);
+const requestSchema = z.object({
+    body: z.object({ phone }),
+    params: empty,
+    query: empty,
+});
+const verifySchema = z.object({
+    body: z.object({ phone, otp: z.string().regex(/^\d{6}$/) }),
+    params: empty,
+    query: empty,
+});
+const profileFields = z.object({
+    name: z.string().trim().min(2).max(100),
+    email: z.union([z.string().trim().email(), z.literal("")]).optional(),
+});
+const completeSchema = z.object({
+    body: z.object({
+        registrationToken: z.string().min(20),
+        ...profileFields.shape,
+    }),
+    params: empty,
+    query: empty,
+});
+const updateProfileSchema = z.object({
+    body: profileFields,
+    params: empty,
+    query: empty,
+});
+const refreshSchema = z.object({
+    body: z.object({ refreshToken: z.string().min(20) }),
+    params: empty,
+    query: empty,
+});
+async function createSession(customer, req) {
+    const session = new CustomerSession({
+        customerId: customer.id,
+        refreshTokenHash: "pending",
+        expiresAt: new Date(Date.now() + env.CUSTOMER_SESSION_TTL_DAYS * 86400000),
+        userAgent: req.get("user-agent"),
+        ip: req.ip,
+    });
+
+    await session.save();
+
+    const refreshToken = signCustomerRefreshToken(customer.id, session.id);
+    session.refreshTokenHash = hashToken(refreshToken);
+
+    await session.save();
+
+    return {
+        customer: {
+            id: customer.id,
+            phone: customer.phone,
+            name: customer.name,
+            email: customer.email,
+        },
+        tokens: {
+            accessToken: signCustomerAccessToken(customer, session.id),
+            refreshToken,
+        },
+    };
+}
+router.post("/request-otp", validate(requestSchema), async (req, res, next) => {
+    try {
+        const normalized = `+91${req.validated.body.phone}`;
+        await CustomerOtp.updateMany(
+            { phone: normalized, consumedAt: null },
+            { consumedAt: new Date() },
+        );
+        const challenge = await CustomerOtp.create({
+            phone: normalized,
+            expiresAt: new Date(Date.now() + 5 * 60000),
+        });
+        return res.json({
+            success: true,
+            data: {
+                challengeId: challenge.id,
+                expiresInSeconds: 300,
+                ...(env.NODE_ENV !== "production" && { devOtp: env.DEV_FIXED_OTP }),
+            },
+        });
+    } catch (e) {
+        return next(e);
+    }
+});
+router.post("/verify-otp", validate(verifySchema), async (req, res, next) => {
+    try {
+        const normalized = `+91${req.validated.body.phone}`;
+        const challenge = await CustomerOtp.findOne({
+            phone: normalized,
+            consumedAt: null,
+            expiresAt: { $gt: new Date() },
+        }).sort({ createdAt: -1 });
+
+        if (!challenge) throw new AppError(400, "OTP_EXPIRED", "Request a new OTP");
+
+        challenge.attempts += 1;
+
+        if (challenge.attempts > 5) {
+            challenge.consumedAt = new Date();
+            await challenge.save();
+            throw new AppError(429, "OTP_ATTEMPTS_EXCEEDED", "Request a new OTP");
+        }
+
+        if (req.validated.body.otp !== env.DEV_FIXED_OTP) {
+            await challenge.save();
+            throw new AppError(400, "INVALID_OTP", "The OTP is incorrect");
+        }
+
+        challenge.consumedAt = new Date();
+        await challenge.save();
+
+        const customer = await Customer.findOne({ phone: normalized });
+
+        if (customer?.status === "BLOCKED") throw new AppError( 403, "CUSTOMER_BLOCKED", "This account is unavailable", );
+
+        if (customer?.profileCompleted) {
+            customer.lastLoginAt = new Date();
+            await customer.save();
+            return res.json({
+                success: true,
+                data: { isNewCustomer: false, ...(await createSession(customer, req)) },
+            });
+        }
+
+        const registrationToken = jwt.sign(
+            {
+                phone: normalized,
+                nonce: crypto.randomUUID(),
+                purpose: "customer_registration",
+            },
+            env.ACCESS_TOKEN_SECRET,
+            {
+                expiresIn: "15m",
+                issuer: "rjs-backend",
+                audience: "rjs-customer-registration",
+            },
+        );
+        return res.json({
+            success: true,
+            data: { isNewCustomer: true, registrationToken, phone: normalized },
+        });
+    } catch (e) {
+        return next(e);
+    }
+});
+router.post("/complete-profile", validate(completeSchema), async (req, res, next) => {
+    try {
+        let payload;
+        try {
+            payload = jwt.verify(
+            req.validated.body.registrationToken,
+            env.ACCESS_TOKEN_SECRET,
+            { issuer: "rjs-backend", audience: "rjs-customer-registration" },
+            );
+        } catch {
+            throw new AppError(
+            401,
+            "INVALID_REGISTRATION_TOKEN",
+            "Verify the phone number again",
+            );
+        }
+        if (payload.purpose !== "customer_registration") 
+            throw new AppError( 401, "INVALID_REGISTRATION_TOKEN", "Verify the phone number again", );
+        const customer = await Customer.findOneAndUpdate(
+            { phone: payload.phone },
+            {
+                $set: {
+                    name: req.validated.body.name,
+                    email: req.validated.body.email || undefined,
+                    profileCompleted: true,
+                    lastLoginAt: new Date(),
+                },
+            },
+            {
+                new: true,
+                upsert: true,
+                runValidators: true,
+                setDefaultsOnInsert: true,
+            },
+        );
+        return res.status(201).json({ success: true, data: await createSession(customer, req) });
+    } catch (e) {
+        return next(e);
+    }
+});
+
+router.post("/refresh", validate(refreshSchema), async (req, res, next) => {
+    try {
+        const token = req.validated.body.refreshToken;
+        let payload;
+        try {
+            payload = verifyCustomerRefreshToken(token);
+        } catch {
+            throw new AppError( 401, "INVALID_REFRESH_TOKEN", "The refresh token is invalid or expired", );
+        }
+        
+        if (payload.tokenType !== "refresh" || payload.actorType !== "customer")
+            throw new AppError( 401, "INVALID_REFRESH_TOKEN", "The refresh token is invalid or expired", );
+
+        const session = await CustomerSession.findById(payload.sid).select("+refreshTokenHash");
+
+        if (!session || session.revokedAt || session.expiresAt <= new Date() || session.refreshTokenHash !== hashToken(token))
+            throw new AppError(401, "INVALID_REFRESH_TOKEN", "The refresh token is invalid or expired",);
+
+        const customer = await Customer.findById(payload.sub);
+
+        if (!customer || customer.status !== "ACTIVE" || !customer.profileCompleted)
+            throw new AppError( 401, "ACCOUNT_UNAVAILABLE", "The customer account is unavailable", );
+
+        const refreshToken = signCustomerRefreshToken(customer.id, session.id);
+
+        session.refreshTokenHash = hashToken(refreshToken);
+
+        await session.save();
+
+        return res.json({
+            success: true,
+            data: {
+                customer: {
+                    id: customer.id,
+                    phone: customer.phone,
+                    name: customer.name,
+                    email: customer.email,
+                },
+                tokens: {
+                    accessToken: signCustomerAccessToken(customer, session.id),
+                    refreshToken,
+                },
+            },
+        });
+    } catch (e) {
+        return next(e);
+    }
+});
+
+router.post("/logout", validate(refreshSchema), async (req, res, next) => {
+    try {
+        try {
+            const payload = verifyCustomerRefreshToken(
+                req.validated.body.refreshToken,
+            );
+            await CustomerSession.findByIdAndUpdate(payload.sid, {
+                revokedAt: new Date(),
+            });
+        } catch {
+            /* Logout is intentionally idempotent. */
+        }
+        return res.json({ success: true, data: { loggedOut: true } });
+    } catch (e) {
+        return next(e);
+    }
+});
+
+router.get("/me", authenticateCustomer, (req, res) =>
+    res.json({
+        success: true,
+        data: {
+            customer: {
+                id: req.customer.id,
+                phone: req.customer.phone,
+                name: req.customer.name,
+                email: req.customer.email,
+            },
+        },
+    }),
+);
+
+router.patch("/me", authenticateCustomer, validate(updateProfileSchema), async (req, res, next) => {
+    try {
+        req.customer.name = req.validated.body.name;
+
+        if (req.validated.body.email)
+            req.customer.email = req.validated.body.email;
+        else req.customer.email = undefined;
+
+        await req.customer.save();
+
+        return res.json({
+            success: true,
+            data: {
+                customer: {
+                    id: req.customer.id,
+                    phone: req.customer.phone,
+                    name: req.customer.name,
+                    email: req.customer.email,
+                },
+            },
+        });
+    } catch (e) {
+        return next(e);
+    }
+});
+
+export { router as customerAuthRouter };

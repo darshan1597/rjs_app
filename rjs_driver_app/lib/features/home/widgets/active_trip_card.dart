@@ -17,11 +17,11 @@ class ActiveTripCard extends StatelessWidget {
   String get status => trip['status']?.toString() ?? '';
 
   String get actionLabel => switch (status) {
-    'AWAITING_PAYMENT' => 'Waiting for Customer Payment',
-    'PAYMENT_CONFIRMED' => 'Start to Pickup',
+    'DRIVER_ACCEPTED' => 'Start to Pickup',
     'DRIVER_EN_ROUTE' => "I've Arrived",
     'ARRIVED' => 'Enter Trip OTP',
     'IN_PROGRESS' => 'Complete Trip',
+    'PAYMENT_PENDING' => 'Waiting for Payment',
     _ => 'Refresh Trip',
   };
 
@@ -30,7 +30,7 @@ class ActiveTripCard extends StatelessWidget {
     final pickup = trip['pickup'] as Map<String, dynamic>? ?? const {};
     final destination = trip['destination'] as Map<String, dynamic>?;
     final customer = trip['customer'] as Map<String, dynamic>? ?? const {};
-    final waiting = status == 'AWAITING_PAYMENT';
+    final waiting = status == 'PAYMENT_PENDING';
     final inProgress = status == 'IN_PROGRESS';
     return Container(
       padding: const EdgeInsets.all(14),
@@ -83,6 +83,21 @@ class ActiveTripCard extends StatelessWidget {
             ]),
           ),
           const SizedBox(height: 10),
+          if (waiting) ...[
+            Text('Final amount: ₹${trip['amount'] ?? '--'}', style: const TextStyle(color: AppColors.navy, fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 10),
+            if ((trip['qrImageUrl']?.toString() ?? '').isNotEmpty)
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.white,
+                  child: Image.network(trip['qrImageUrl'].toString(), width: 210, height: 210),
+                ),
+              ),
+            const SizedBox(height: 8),
+            const Center(child: Text('Customer can scan this QR with any UPI app', style: TextStyle(color: AppColors.muted, fontSize: 11))),
+            const SizedBox(height: 10),
+          ],
           SizedBox(
             width: double.infinity,
             height: 43,

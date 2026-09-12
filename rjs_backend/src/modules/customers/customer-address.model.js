@@ -13,11 +13,33 @@ const customerAddressSchema = new mongoose.Schema(
       enum: ['HOME', 'WORK', 'FAVORITE'],
       required: true,
     },
-    label: { type: String, trim: true, maxlength: 60 },
-    addressLine: { type: String, required: true, trim: true, maxlength: 300 },
-    landmark: { type: String, trim: true, maxlength: 120 },
-    city: { type: String, trim: true, maxlength: 80, default: 'Bengaluru' },
-    pincode: { type: String, trim: true, maxlength: 10 },
+    label: { 
+      type: String, 
+      trim: true, 
+      maxlength: 60 
+    },
+    addressLine: { 
+      type: String, 
+      required: true, 
+      trim: true, 
+      maxlength: 300 
+    },
+    landmark: { 
+      type: String, 
+      trim: true, 
+      maxlength: 120 
+    },
+    city: { 
+      type: String, 
+      trim: true, 
+      maxlength: 80, 
+      default: 'Bengaluru' 
+    },
+    pincode: { 
+      type: String, 
+      trim: true, 
+      maxlength: 10 
+    },
     location: {
       latitude: Number,
       longitude: Number,
@@ -27,7 +49,10 @@ const customerAddressSchema = new mongoose.Schema(
 );
 
 customerAddressSchema.index(
-  { customerId: 1, type: 1 },
+  { 
+    customerId: 1, 
+    type: 1 
+  },
   {
     unique: true,
     partialFilterExpression: { type: { $in: ['HOME', 'WORK'] } },

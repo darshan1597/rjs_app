@@ -26,6 +26,7 @@ function Toast({ toast, close }) {
     </div>
   );
 }
+
 function Pager({ data, setPage }) {
   if (!data || data.pages <= 1) return null;
   return (
@@ -52,6 +53,7 @@ function Pager({ data, setPage }) {
     </div>
   );
 }
+
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState([]);
   const [pagination, setPagination] = useState(null);

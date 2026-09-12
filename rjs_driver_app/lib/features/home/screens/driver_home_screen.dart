@@ -134,7 +134,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
-                      'Ride accepted. Waiting for customer payment.',
+                      'Ride accepted. You can start towards the pickup.',
                     ),
                   ),
                 );
@@ -196,13 +196,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       otp = await _askForOtp();
       if (otp == null) return;
     }
+    Map<String, double>? charges;
+    if (status == 'IN_PROGRESS') {
+      charges = await _askForFinalCharges();
+      if (charges == null) return;
+    }
     setState(() => _tripBusy = true);
     try {
       final updated = switch (status) {
-        'PAYMENT_CONFIRMED' => await DriverApiService.markEnRoute(id),
+        'DRIVER_ACCEPTED' => await DriverApiService.markEnRoute(id),
         'DRIVER_EN_ROUTE' => await DriverApiService.markArrived(id),
         'ARRIVED' => await DriverApiService.startTrip(id, otp!),
-        'IN_PROGRESS' => await DriverApiService.completeTrip(id),
+        'IN_PROGRESS' => await DriverApiService.completeTrip(
+          id,
+          parkingCharge: charges!['parkingCharge']!,
+          tollCharge: charges['tollCharge']!,
+        ),
         _ => await DriverApiService.activeTrip(),
       };
       if (mounted) setState(() => _activeTrip = updated);
@@ -211,6 +220,52 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     } finally {
       if (mounted) setState(() => _tripBusy = false);
     }
+  }
+
+  Future<Map<String, double>?> _askForFinalCharges() async {
+    final parking = TextEditingController(text: '0');
+    final toll = TextEditingController(text: '0');
+    return showModalBottomSheet<Map<String, double>>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          18,
+          20,
+          20 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Complete trip & calculate bill', style: TextStyle(color: AppColors.navy, fontSize: 20, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            const Text('Pickup waiting is calculated automatically. Enter only charges actually incurred during this ride.', style: TextStyle(color: AppColors.muted)),
+            const SizedBox(height: 16),
+            TextField(controller: parking, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parking charge', prefixText: '₹ ')),
+            const SizedBox(height: 10),
+            TextField(controller: toll, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Toll charge', prefixText: '₹ ')),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(sheetContext, {
+                  'parkingCharge': double.tryParse(parking.text) ?? 0,
+                  'tollCharge': double.tryParse(toll.text) ?? 0,
+                }),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
+                child: const Text('Generate final bill', style: TextStyle(fontWeight: FontWeight.w900)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
