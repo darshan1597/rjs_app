@@ -12,6 +12,7 @@ import {
 } from "react-icons/lu";
 import AdminLayout from "../components/AdminLayout.jsx";
 import { get, post } from "../services/api.js";
+import { isPickupOverdue } from '../utils/scheduled-booking-status.js';
 
 const types = {
   IMMEDIATE_RIDE: "Nearby ride",
@@ -21,6 +22,7 @@ const types = {
   TOUR_PACKAGE: "Tour package",
   CUSTOM_TRIP: "Custom trip",
 };
+const assignableStatuses = new Set(['NEW', 'PAYMENT_CONFIRMED', 'ASSIGNMENT_PENDING', 'ASSIGNED', 'DRIVER_ACCEPTED']);
 const statusTone = {
   NEW: "bg-slate-100 text-slate-600",
   PAYMENT_CONFIRMED: "bg-blue-50 text-blue-600",
@@ -171,7 +173,7 @@ function AssignmentPanel({ booking, close, assigned }) {
         <button
           disabled={!selected || saving}
           onClick={assign}
-          className="mt-6 h-11 w-full rounded-xl bg-orange-500 text-[10px] font-extrabold text-white disabled:opacity-40"
+          className="mt-6 h-11 w-full rounded-xl bg-orange-500 text-[10px] font-extrabold text-white disabled:opacity-40 cursor-pointer"
         >
           {saving ? "Assigning..." : "Confirm driver assignment"}
         </button>
@@ -188,6 +190,11 @@ export default function BookingsPage() {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState("");
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(timer);
+  }, []);
   const [serviceType, setServiceType] = useState("");
   const [payment, setPayment] = useState("");
   const [loading, setLoading] = useState(true);
@@ -461,13 +468,22 @@ export default function BookingsPage() {
                         >
                           {booking.status.replaceAll("_", " ")}
                         </span>
+                        {isPickupOverdue(booking, now) && (
+                          <div className="mt-2">
+                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[8px] font-bold text-amber-800" title="Pickup time passed before the driver started toward pickup. Booking has not been cancelled.">
+                              Pickup overdue
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-4">
-                        {!booking.currentDriverId &&
+                        {!assignableStatuses.has(booking.status) ? (
+                          <span className="text-[8px] text-slate-400">—</span>
+                        ) : !booking.currentDriverId &&
                         booking.assignmentMode === "MANUAL" ? (
                           <button
                             onClick={() => setAssignment(booking)}
-                            className="rounded-lg bg-orange-500 px-3 py-2 text-[8px] font-bold text-white"
+                            className="rounded-lg bg-orange-500 px-3 py-2 text-[8px] font-bold text-white cursor-pointer"
                           >
                             Assign driver
                           </button>
@@ -478,7 +494,7 @@ export default function BookingsPage() {
                         ) : (
                           <button
                             onClick={() => setAssignment(booking)}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-[8px] font-bold"
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-[8px] font-bold cursor-pointer"
                           >
                             Reassign
                           </button>

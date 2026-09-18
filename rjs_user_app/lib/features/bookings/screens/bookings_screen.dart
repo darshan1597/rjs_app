@@ -8,6 +8,9 @@ import '../../../shared/widgets/book_ride_scaffold.dart';
 import '../../../shared/widgets/notification_popup.dart';
 import '../../rides/screens/driver_search_screen.dart';
 import '../../rides/services/customer_booking_service.dart';
+import 'payment_receipt_screen.dart';
+import 'scheduled_booking_details_screen.dart';
+import '../models/scheduled_booking_status.dart';
 
 enum _TripFilter { all, live, upcoming, completed }
 
@@ -270,7 +273,17 @@ class _BookingsScreenState extends State<BookingsScreen>
                     const SizedBox(height: 10),
                   ],
                   if (_showUpcoming && _upcomingTrips.isNotEmpty) ...[
-                    _DynamicUpcomingTrips(bookings: _upcomingTrips),
+                    _DynamicUpcomingTrips(
+                      bookings: _upcomingTrips,
+                      onOpen: (booking) => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ScheduledBookingDetailsScreen(
+                            booking: booking,
+                            onTrack: _openLiveTrip,
+                          ),
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 10),
                   ],
                   if (_showCompleted && _completedTrips.isNotEmpty)
@@ -877,8 +890,9 @@ class _LiveTrips extends StatelessWidget {
 }
 
 class _DynamicUpcomingTrips extends StatelessWidget {
-  const _DynamicUpcomingTrips({required this.bookings});
+  const _DynamicUpcomingTrips({required this.bookings, required this.onOpen});
   final List<Map<String, dynamic>> bookings;
+  final ValueChanged<Map<String, dynamic>> onOpen;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -895,6 +909,8 @@ class _DynamicUpcomingTrips extends StatelessWidget {
         const SizedBox(height: 10),
         for (var index = 0; index < bookings.length; index++) ...[
           _TripCard(
+            onTap: () => onOpen(bookings[index]),
+            overdue: isScheduledPickupOverdue(bookings[index]),
             image: _vehicleImage(
               bookings[index]['vehicleVariant']?.toString() ?? 'AUTO',
             ),
@@ -983,7 +999,20 @@ class _DynamicCompletedTrips extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         for (var index = 0; index < bookings.length; index++) ...[
-          _DynamicCompactTrip(booking: bookings[index]),
+          _DynamicCompactTrip(
+            booking: bookings[index],
+            onReceipt:
+                bookings[index]['status'] == 'COMPLETED' &&
+                    bookings[index]['paymentStatus'] == 'PAID'
+                ? () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => PaymentReceiptScreen(
+                        bookingId: bookings[index]['id'].toString(),
+                      ),
+                    ),
+                  )
+                : null,
+          ),
           if (index != bookings.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -992,8 +1021,9 @@ class _DynamicCompletedTrips extends StatelessWidget {
 }
 
 class _DynamicCompactTrip extends StatelessWidget {
-  const _DynamicCompactTrip({required this.booking});
+  const _DynamicCompactTrip({required this.booking, this.onReceipt});
   final Map<String, dynamic> booking;
+  final VoidCallback? onReceipt;
 
   @override
   Widget build(BuildContext context) {
@@ -1003,108 +1033,115 @@ class _DynamicCompactTrip extends StatelessWidget {
         status == 'NO_SHOW' ||
         status == 'NO_DRIVER_AVAILABLE';
     final statusColor = cancelled ? Colors.red : const Color(0xFF168C35);
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E5ED)),
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(7),
-            child: Image.asset(
-              _vehicleImage(booking['vehicleVariant']?.toString() ?? 'AUTO'),
-              width: 68,
-              height: 68,
-              fit: BoxFit.contain,
+    return InkWell(
+      onTap: onReceipt,
+      borderRadius: BorderRadius.circular(9),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFE0E5ED)),
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: Image.asset(
+                _vehicleImage(booking['vehicleVariant']?.toString() ?? 'AUTO'),
+                width: 68,
+                height: 68,
+                fit: BoxFit.contain,
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Badge(_serviceLabel(booking)),
+                  const SizedBox(height: 5),
+                  Text(
+                    _serviceLabel(booking),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  _RoutePoint(
+                    color: const Color(0xFF16A33B),
+                    text: _address(booking['pickup']),
+                  ),
+                  const SizedBox(height: 4),
+                  _RoutePoint(
+                    color: Colors.red,
+                    text: _address(booking['destination']),
+                  ),
+                ],
+              ),
+            ),
+            Container(width: 1, height: 51, color: const Color(0xFFE2E6ED)),
+            const SizedBox(width: 7),
+            SizedBox(
+              width: 82,
+              child: Column(
+                children: [
+                  _Meta(
+                    Icons.calendar_month_outlined,
+                    _formatDate(booking['scheduledStartAt']),
+                  ),
+                  const SizedBox(height: 6),
+                  _Meta(
+                    Icons.schedule_outlined,
+                    _formatTime(booking['scheduledStartAt']),
+                  ),
+                  const SizedBox(height: 6),
+                  _Meta(
+                    Icons.person_outline_rounded,
+                    '${booking['passengerCount'] ?? 1} People',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 5),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                _Badge(_serviceLabel(booking)),
-                const SizedBox(height: 5),
                 Text(
-                  _serviceLabel(booking),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  _money(booking['amount']),
                   style: const TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 11.5,
+                    color: AppColors.blue,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 5),
-                _RoutePoint(
-                  color: const Color(0xFF16A33B),
-                  text: _address(booking['pickup']),
-                ),
-                const SizedBox(height: 4),
-                _RoutePoint(
-                  color: Colors.red,
-                  text: _address(booking['destination']),
-                ),
-              ],
-            ),
-          ),
-          Container(width: 1, height: 51, color: const Color(0xFFE2E6ED)),
-          const SizedBox(width: 7),
-          SizedBox(
-            width: 82,
-            child: Column(
-              children: [
-                _Meta(
-                  Icons.calendar_month_outlined,
-                  _formatDate(booking['scheduledStartAt']),
-                ),
-                const SizedBox(height: 6),
-                _Meta(
-                  Icons.schedule_outlined,
-                  _formatTime(booking['scheduledStartAt']),
-                ),
-                const SizedBox(height: 6),
-                _Meta(
-                  Icons.person_outline_rounded,
-                  '${booking['passengerCount'] ?? 1} People',
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 5),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _money(booking['amount']),
-                style: const TextStyle(
-                  color: AppColors.blue,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: .1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _statusLabel(status),
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 7.5,
-                    fontWeight: FontWeight.w700,
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: .1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    onReceipt == null ? _statusLabel(status) : 'View receipt',
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 7.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1190,6 +1227,8 @@ class _SectionHeader extends StatelessWidget {
 
 class _TripCard extends StatelessWidget {
   const _TripCard({
+    this.overdue = false,
+    this.onTap,
     required this.image,
     required this.badge,
     required this.title,
@@ -1202,6 +1241,8 @@ class _TripCard extends StatelessWidget {
     required this.details,
     required this.price,
   });
+  final VoidCallback? onTap;
+  final bool overdue;
   final String image,
       badge,
       title,
@@ -1214,106 +1255,123 @@ class _TripCard extends StatelessWidget {
       details,
       price;
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: const Color(0xFFE0E5ED)),
-      borderRadius: BorderRadius.circular(9),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(7),
-                child: Image.asset(
-                  image,
-                  width: 76,
-                  height: 76,
-                  fit: BoxFit.cover,
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE0E5ED)),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          if (overdue)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              color: AppColors.orange.withValues(alpha: .1),
+              child: const Text(
+                'Pickup overdue · Contact RJS support',
+                style: TextStyle(
+                  color: AppColors.orange,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _Badge(badge),
-                    const SizedBox(height: 5),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: AppColors.navy,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
+            ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(7),
+                  child: Image.asset(
+                    image,
+                    width: 76,
+                    height: 76,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Badge(badge),
+                      const SizedBox(height: 5),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: AppColors.navy,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 7),
-                    _RoutePoint(color: Color(0xFF16A33B), text: from),
-                    const SizedBox(height: 5),
-                    _RoutePoint(color: Colors.red, text: to),
-                  ],
+                      const SizedBox(height: 7),
+                      _RoutePoint(color: Color(0xFF16A33B), text: from),
+                      const SizedBox(height: 5),
+                      _RoutePoint(color: Colors.red, text: to),
+                    ],
+                  ),
                 ),
-              ),
-              Container(width: 1, height: 61, color: const Color(0xFFE2E6ED)),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 91,
-                child: Column(
-                  children: [
-                    _Meta(Icons.calendar_month_outlined, date),
-                    SizedBox(height: 7),
-                    _Meta(Icons.schedule_outlined, time),
-                    SizedBox(height: 7),
-                    _Meta(Icons.person_outline_rounded, people),
-                  ],
+                Container(width: 1, height: 61, color: const Color(0xFFE2E6ED)),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 91,
+                  child: Column(
+                    children: [
+                      _Meta(Icons.calendar_month_outlined, date),
+                      SizedBox(height: 7),
+                      _Meta(Icons.schedule_outlined, time),
+                      SizedBox(height: 7),
+                      _Meta(Icons.person_outline_rounded, people),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        Container(height: 1, color: const Color(0xFFE5E8EE)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.directions_car_outlined,
-                size: 16,
-                color: AppColors.navy,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                vehicle,
-                style: const TextStyle(color: AppColors.muted, fontSize: 9),
-              ),
-              const Spacer(),
-              Text(
-                details,
-                style: const TextStyle(color: AppColors.muted, fontSize: 9),
-              ),
-              const Spacer(),
-              Text(
-                price,
-                style: const TextStyle(
-                  color: AppColors.blue,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+          Container(height: 1, color: const Color(0xFFE5E8EE)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.directions_car_outlined,
+                  size: 16,
+                  color: AppColors.navy,
                 ),
-              ),
-              const SizedBox(width: 5),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: AppColors.navy,
-              ),
-            ],
+                const SizedBox(width: 5),
+                Text(
+                  vehicle,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 9),
+                ),
+                const Spacer(),
+                Text(
+                  details,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 9),
+                ),
+                const Spacer(),
+                Text(
+                  price,
+                  style: const TextStyle(
+                    color: AppColors.blue,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppColors.navy,
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }

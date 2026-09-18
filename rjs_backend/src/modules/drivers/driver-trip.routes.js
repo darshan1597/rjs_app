@@ -8,6 +8,8 @@ import { VehicleVariant } from '../vehicles/vehicle.model.js';
 import { calculateLocalFare } from '../bookings/local-fare.service.js';
 import { createQrCode } from '../payments/razorpay.service.js';
 import { authenticateDriver } from './driver-auth.middleware.js';
+import { scheduledPickupState } from '../bookings/scheduled-pickup-policy.js';
+import { preparePickup, pickupPreparationState } from '../bookings/pickup-preparation.service.js';
 
 const router = express.Router();
 const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.variantId
@@ -16,6 +18,9 @@ const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.var
 const empty = z.object({});
 const id = z.string().regex(/^[a-f\d]{24}$/i);
 const idSchema = z.object({ body: empty, params: z.object({ bookingId: id }), query: empty });
+const pickupLocation = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), recordedAt: z.coerce.date() });
+const previewSchema = z.object({ body: pickupLocation, params: z.object({ bookingId: id }), query: empty });
+const enRouteSchema = z.object({ body: pickupLocation.partial(), params: z.object({ bookingId: id }), query: empty });
 const startSchema = z.object({ body: z.object({ otp: z.string().regex(/^\d{6}$/) }), params: z.object({ bookingId: id }), query: empty });
 const arriveSchema = z.object({
   body: z.object({
@@ -31,6 +36,18 @@ const completeSchema = z.object({
     tollCharge: z.coerce.number().min(0).max(100000).default(0),
   }),
   params: z.object({ bookingId: id }),
+  query: empty,
+});
+const locationSchema = z.object({
+  body: z.object({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    accuracyMetres: z.number().min(0).max(5000),
+    heading: z.number().min(0).max(360).default(0),
+    speedMetresPerSecond: z.number().min(0).max(150).default(0),
+    recordedAt: z.coerce.date(),
+  }),
+  params: empty,
   query: empty,
 });
 const radians = (degrees) => degrees * Math.PI / 180;
@@ -73,6 +90,8 @@ const toActiveTrip = (booking) => ({
   status: booking.status,
   customer: booking.customer,
   scheduledStartAt: booking.scheduledStartAt,
+  timing: booking.timing,
+  ...pickupPreparationState(booking, booking.currentDriverId),
   ...['PAYMENT_PENDING', 'COMPLETED'].includes(booking.status) ? {
     amount: booking.totalAmount,
     pricing: booking.pricingSnapshot,
@@ -83,6 +102,52 @@ const toActiveTrip = (booking) => ({
 
 router.use(authenticateDriver);
 
+router.post('/:bookingId/pickup-preview', validate(previewSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({ _id: req.validated.params.bookingId, currentDriverId: req.driver._id, status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'] } });
+    if (!booking) throw new AppError(409, 'PICKUP_PREVIEW_UNAVAILABLE', 'This ride is not available for pickup preview');
+    const preparation = await preparePickup(booking, req.driver, req.validated.body);
+    const state = scheduledPickupState(booking, Date.now(), preparation.route.durationMinutes);
+    return res.json({ success: true, data: { trip: { ...toActiveTrip(booking), ...state }, preparation, onlineRequired: req.driver.operationalStatus === 'OFFLINE' } });
+  } catch (error) { return next(error); }
+});
+
+// Retry QR creation without recalculating or changing the frozen final bill.
+const qrRequests = new Map();
+router.post('/:bookingId/payment-qr', validate(idSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOneAndUpdate({ _id: req.validated.params.bookingId, currentDriverId: req.driver._id, status: 'PAYMENT_PENDING', paymentStatus: 'PENDING', paymentChannel: { $ne: 'WALLET' } }, { $set: { paymentChannel: 'RAZORPAY' } }, { new: true });
+    if (!booking) throw new AppError(409, 'PAYMENT_NOT_PENDING', 'This ride is not awaiting payment');
+    if (!booking.razorpayQrImageUrl) {
+      let pending = qrRequests.get(booking.id);
+      if (!pending) {
+        pending = (async () => {
+          const qr = await createQrCode(booking);
+          await Booking.updateOne({ _id: booking._id, status: 'PAYMENT_PENDING', paymentStatus: 'PENDING' }, { $set: { razorpayQrCodeId: qr.id, razorpayQrImageUrl: qr.image_url } });
+        })();
+        qrRequests.set(booking.id, pending);
+      }
+      try { await pending; } finally { if (qrRequests.get(booking.id) === pending) qrRequests.delete(booking.id); }
+    }
+    const refreshed = await Booking.findById(booking._id);
+    return res.json({ success: true, data: { trip: toActiveTrip(refreshed) } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/scheduled', async (req, res, next) => {
+  try {
+    const bookings = await Booking.find({
+      currentDriverId: req.driver._id,
+      timing: 'SCHEDULED',
+      status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING'] },
+    }).sort({ scheduledStartAt: 1, _id: 1 });
+    return res.json({ success: true, data: { trips: bookings.map((booking) => ({
+      ...toActiveTrip(booking),
+      serviceType: booking.serviceType,
+    })) } });
+  } catch (error) { return next(error); }
+});
+
 router.patch('/availability', validate(availabilitySchema), async (req, res, next) => {
   try {
     if (req.driver.operationalStatus === 'ON_TRIP') {
@@ -91,6 +156,21 @@ router.patch('/availability', validate(availabilitySchema), async (req, res, nex
     req.driver.operationalStatus = req.validated.body.status;
     await req.driver.save();
     return res.json({ success: true, data: { operationalStatus: req.driver.operationalStatus } });
+  } catch (error) { return next(error); }
+});
+
+router.patch('/location', validate(locationSchema), async (req, res, next) => {
+  try {
+    if (!['ONLINE', 'ON_TRIP'].includes(req.driver.operationalStatus)) {
+      throw new AppError(409, 'DRIVER_OFFLINE', 'Go online before sharing location');
+    }
+    const recordedAt = req.validated.body.recordedAt;
+    if (Math.abs(Date.now() - recordedAt.getTime()) > 2 * 60 * 1000) {
+      throw new AppError(400, 'STALE_LOCATION', 'Location reading is too old');
+    }
+    req.driver.currentLocation = { ...req.validated.body, recordedAt };
+    await req.driver.save();
+    return res.json({ success: true, data: { location: req.driver.currentLocation } });
   } catch (error) { return next(error); }
 });
 
@@ -132,10 +212,16 @@ router.get('/offers', async (req, res, next) => {
 
 router.get('/active', async (req, res, next) => {
   try {
-    const booking = await Booking.findOne({
+    const currentRide = await Booking.findOne({
       currentDriverId: req.driver._id,
-      status: { $in: ['DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING'] },
-    }).sort({ updatedAt: -1 });
+      status: { $in: ['DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING'] },
+    }).sort({ startedAt: 1, updatedAt: 1, _id: 1 });
+    const booking = currentRide ?? await Booking.findOne({
+      currentDriverId: req.driver._id,
+      $or: [
+        { status: 'DRIVER_ACCEPTED', timing: { $ne: 'SCHEDULED' } },
+      ],
+    }).sort({ scheduledStartAt: 1, _id: 1 });
     return res.json({ success: true, data: { trip: booking ? toActiveTrip(booking) : null } });
   } catch (error) { return next(error); }
 });
@@ -203,7 +289,30 @@ async function transition(req, res, next, from, to, extra = {}) {
   } catch (error) { return next(error); }
 }
 
-router.post('/:bookingId/en-route', validate(idSchema), (req, res, next) => transition(req, res, next, 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'));
+router.post('/:bookingId/en-route', validate(enRouteSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.validated.params.bookingId,
+      currentDriverId: req.driver._id,
+      status: { $in: ['DRIVER_ACCEPTED', 'ASSIGNED'] },
+    });
+    if (!booking) throw new AppError(409, 'INVALID_TRIP_TRANSITION', 'This trip is not ready to begin');
+    const busyTrip = await Booking.exists({
+      _id: { $ne: booking._id }, currentDriverId: req.driver._id,
+      status: { $in: ['DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING'] },
+    });
+    if (busyTrip) throw new AppError(409, 'DRIVER_ON_TRIP', 'Finish your current ride and payment before starting another pickup');
+    if (booking.timing === 'SCHEDULED') {
+      if (scheduledPickupState(booking).pickupOverdue) throw new AppError(409, 'SCHEDULED_PICKUP_OVERDUE', 'Pickup time has passed. Contact RJS admin to resolve this booking');
+      if (req.driver.operationalStatus === 'OFFLINE') throw new AppError(409, 'DRIVER_OFFLINE', 'Go online before starting pickup');
+      const preparation = await preparePickup(booking, req.driver, req.validated.body, { force: true });
+      const window = scheduledPickupState(booking, Date.now(), preparation.route.durationMinutes);
+      if (window.pickupOverdue) throw new AppError(409, 'SCHEDULED_PICKUP_OVERDUE', 'Pickup time has passed. Contact RJS admin');
+      if (!window.canStartPickup) throw new AppError(409, 'SCHEDULED_RIDE_TOO_EARLY', `Start to Pickup opens at ${window.recommendedDepartureAt.toISOString()} (ETA plus 15-minute buffer)`);
+    }
+    return transition(req, res, next, ['DRIVER_ACCEPTED', 'ASSIGNED'], 'DRIVER_EN_ROUTE');
+  } catch (error) { return next(error); }
+});
 
 router.post('/:bookingId/arrive', validate(arriveSchema), async (req, res, next) => {
   try {
@@ -282,13 +391,7 @@ router.post('/:bookingId/complete', validate(completeSchema), async (req, res, n
     booking.completedAt = new Date();
     booking.statusHistory.push({ status: 'PAYMENT_PENDING', note: 'Trip ended; final bill generated' });
 
-    try {
-      const qr = await createQrCode(booking);
-      booking.razorpayQrCodeId = qr.id;
-      booking.razorpayQrImageUrl = qr.image_url;
-    } catch (error) {
-      req.log?.warn({ error: error.message }, 'Unable to create Razorpay QR; checkout remains available');
-    }
+    // Generate QR only on request, so the customer can choose wallet first.
     await booking.save();
     return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
   } catch (error) { 

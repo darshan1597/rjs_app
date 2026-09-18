@@ -27,11 +27,18 @@ class _MapBookingHeaderState extends State<MapBookingHeader> {
   static const LatLng _bengaluru = LatLng(12.9716, 77.5946);
 
   late final Future<MapPlace> _currentPlace;
+  GoogleMapController? _mapController;
 
   @override
   void initState() {
     super.initState();
     _currentPlace = MapsService.currentPlace();
+    _currentPlace.then((place) {
+      if (!mounted) return;
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
+        LatLng(place.latitude, place.longitude), 15.5,
+      ));
+    }, onError: (Object _) {});
   }
 
   @override
@@ -47,12 +54,20 @@ class _MapBookingHeaderState extends State<MapBookingHeader> {
             child: FutureBuilder<MapPlace>(
               future: _currentPlace,
               builder: (context, snapshot) {
-                final place = snapshot.data;
+                final place = snapshot.data ?? MapsService.cachedCurrentPlace;
                 final center = place == null
                     ? _bengaluru
                     : LatLng(place.latitude, place.longitude);
                 return GoogleMap(
-                  key: ValueKey(center),
+                  onMapCreated: (controller) {
+                    _mapController = controller;
+                    final current = MapsService.cachedCurrentPlace;
+                    if (current != null) {
+                      controller.moveCamera(CameraUpdate.newLatLngZoom(
+                        LatLng(current.latitude, current.longitude), 15.5,
+                      ));
+                    }
+                  },
                   mapId: GoogleMapsConfig.mapId,
                   initialCameraPosition: CameraPosition(
                     target: center,

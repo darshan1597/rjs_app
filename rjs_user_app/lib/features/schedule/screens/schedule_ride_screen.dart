@@ -4,6 +4,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/app_page_header.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
+import '../../../shared/widgets/scheduled_time_picker.dart';
+import '../../location/models/map_place.dart';
+import '../../location/screens/location_search_screen.dart';
+import '../../rides/screens/choose_ride_screen.dart';
 
 class ScheduleRideScreen extends StatefulWidget {
   const ScheduleRideScreen({super.key});
@@ -13,35 +17,85 @@ class ScheduleRideScreen extends StatefulWidget {
 }
 
 class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
-  int _selectedVehicle = 1;
+  MapPlace? _pickup;
+  MapPlace? _destination;
+  late DateTime _scheduledFor;
 
-  static const _vehicles = [
-    _ScheduleVehicle(
-      name: 'Auto',
-      seats: '3 Seater',
-      image: 'assets/images/schedule-auto.png',
+  @override
+  void initState() {
+    super.initState();
+    final initial = DateTime.now().add(const Duration(minutes: 35));
+    _scheduledFor = DateTime(initial.year, initial.month, initial.day, initial.hour, initial.minute);
+  }
+
+  Future<MapPlace?> _pickLocation(MapPlace? initial) => Navigator.push<MapPlace>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => LocationSearchScreen(
+        initialValue: initial?.address ?? '',
+        initialPlace: initial,
+      ),
     ),
-    _ScheduleVehicle(
-      name: 'Car',
-      seats: '4 Seater',
-      image: 'assets/images/popup-car.png',
-    ),
-    _ScheduleVehicle(
-      name: 'SUV',
-      seats: '6 Seater',
-      image: 'assets/images/ride-suv.png',
-    ),
-    _ScheduleVehicle(
-      name: 'Sedan',
-      seats: '4 Seater',
-      image: 'assets/images/ride-sedan.png',
-    ),
-    _ScheduleVehicle(
-      name: '8 Seater',
-      seats: '8 Seater',
-      image: 'assets/images/schedule-8-seater.png',
-    ),
-  ];
+  );
+
+  Future<void> _selectPickup() async {
+    final value = await _pickLocation(_pickup);
+    if (value != null && mounted) setState(() => _pickup = value);
+  }
+
+  Future<void> _selectDestination() async {
+    final value = await _pickLocation(_destination);
+    if (value != null && mounted) setState(() => _destination = value);
+  }
+
+  void _swapLocations() => setState(() {
+    final pickup = _pickup;
+    _pickup = _destination;
+    _destination = pickup;
+  });
+
+  Future<void> _pickDate() async {
+    final value = await showDatePicker(
+      context: context,
+      initialDate: _scheduledFor,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+    );
+    if (value != null && mounted) {
+      final candidate = DateTime(value.year, value.month, value.day, _scheduledFor.hour, _scheduledFor.minute);
+      final minimum = DateTime.now().add(const Duration(minutes: 35));
+      setState(() => _scheduledFor = candidate.isBefore(minimum) ? minimum : candidate);
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final value = await showScheduledTimePicker(context: context, date: _scheduledFor, initialTime: TimeOfDay.fromDateTime(_scheduledFor));
+    if (value != null && mounted) {
+      setState(() => _scheduledFor = DateTime(_scheduledFor.year, _scheduledFor.month, _scheduledFor.day, value.hour, value.minute));
+    }
+  }
+
+  void _continue() {
+    if (_pickup == null || _destination == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter both pickup and drop locations')));
+      return;
+    }
+    if (_scheduledFor.isBefore(DateTime.now().add(const Duration(minutes: 30)))) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose a pickup time at least 30 minutes from now')));
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ChooseRideScreen(pickup: _pickup!, destination: _destination!, scheduledFor: _scheduledFor),
+      ),
+    );
+  }
+
+  String get _dateLabel {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[_scheduledFor.month - 1]} ${_scheduledFor.day}, ${_scheduledFor.year}';
+  }
 
   @override
   Widget build(BuildContext context) => BookRideScaffold(
@@ -71,22 +125,24 @@ class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
             ),
             sliver: SliverList.list(
               children: [
-                const _AlignedLocationSection(),
-                const SizedBox(height: 12),
-                const _DateTimeSection(),
-                const SizedBox(height: 12),
-                _VehicleSection(
-                  vehicles: _vehicles,
-                  selectedIndex: _selectedVehicle,
-                  onSelected: (index) =>
-                      setState(() => _selectedVehicle = index),
+                _AlignedLocationSection(
+                  pickup: _pickup,
+                  destination: _destination,
+                  onPickup: _selectPickup,
+                  onDestination: _selectDestination,
+                  onSwap: _swapLocations,
                 ),
                 const SizedBox(height: 12),
-                const _AdditionalOptions(),
+                _DateTimeSection(
+                  date: _dateLabel,
+                  time: TimeOfDay.fromDateTime(_scheduledFor).format(context),
+                  onDate: _pickDate,
+                  onTime: _pickTime,
+                ),
                 const SizedBox(height: 12),
                 const _AdvanceNotice(),
                 const SizedBox(height: 14),
-                _ScheduleButton(vehicle: _vehicles[_selectedVehicle].name),
+                _ScheduleButton(onPressed: _continue),
               ],
             ),
           ),
@@ -235,7 +291,19 @@ class _ReferencePlanningBanner extends StatelessWidget {
 }
 
 class _AlignedLocationSection extends StatelessWidget {
-  const _AlignedLocationSection();
+  const _AlignedLocationSection({
+    required this.pickup,
+    required this.destination,
+    required this.onPickup,
+    required this.onDestination,
+    required this.onSwap,
+  });
+
+  final MapPlace? pickup;
+  final MapPlace? destination;
+  final VoidCallback onPickup;
+  final VoidCallback onDestination;
+  final VoidCallback onSwap;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -245,30 +313,36 @@ class _AlignedLocationSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(right: 49),
           child: Column(
-            children: const [
+            children: [
               _AlignedLocationRow(
                 iconColor: AppColors.orange,
                 label: 'Pickup Location',
-                hint: 'Enter pickup location',
+                value: pickup?.address ?? 'Enter pickup location',
+                onTap: onPickup,
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _AlignedLocationRow(
                 iconColor: AppColors.blue,
                 label: 'Drop Location',
-                hint: 'Enter drop location',
+                value: destination?.address ?? 'Enter drop location',
+                onTap: onDestination,
               ),
             ],
           ),
         ),
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFFE2E6ED)),
+        InkWell(
+          onTap: onSwap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFE2E6ED)),
+            ),
+            child: const Icon(Icons.swap_vert_rounded, color: AppColors.navy),
           ),
-          child: const Icon(Icons.swap_vert_rounded, color: AppColors.navy),
         ),
       ],
     ),
@@ -279,12 +353,14 @@ class _AlignedLocationRow extends StatelessWidget {
   const _AlignedLocationRow({
     required this.iconColor,
     required this.label,
-    required this.hint,
+    required this.value,
+    required this.onTap,
   });
 
   final Color iconColor;
   final String label;
-  final String hint;
+  final String value;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -298,15 +374,16 @@ class _AlignedLocationRow extends StatelessWidget {
         ),
       ),
       const SizedBox(width: 9),
-      Expanded(child: _LocationInput(label, hint)),
+      Expanded(child: _LocationInput(label, value, onTap)),
     ],
   );
 }
 
 class _LocationInput extends StatelessWidget {
-  const _LocationInput(this.label, this.hint);
+  const _LocationInput(this.label, this.value, this.onTap);
   final String label;
-  final String hint;
+  final String value;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -321,7 +398,10 @@ class _LocationInput extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 4),
-      Container(
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: Container(
         height: 39,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
@@ -332,7 +412,9 @@ class _LocationInput extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                hint,
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF9299A8),
                   fontSize: 11.5,
@@ -346,26 +428,33 @@ class _LocationInput extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     ],
   );
 }
 
 class _DateTimeSection extends StatelessWidget {
-  const _DateTimeSection();
+  const _DateTimeSection({required this.date, required this.time, required this.onDate, required this.onTime});
+
+  final String date;
+  final String time;
+  final VoidCallback onDate;
+  final VoidCallback onTime;
 
   @override
-  Widget build(BuildContext context) => const _Panel(
+  Widget build(BuildContext context) => _Panel(
     child: Row(
       children: [
         Expanded(
           child: _PickerField(
             icon: Icons.calendar_month_rounded,
             title: 'Pick-up Date',
-            value: 'May 25, 2026',
+            value: date,
+            onTap: onDate,
           ),
         ),
-        Padding(
+        const Padding(
           padding: EdgeInsets.symmetric(horizontal: 10),
           child: SizedBox(height: 62, child: VerticalDivider()),
         ),
@@ -373,7 +462,8 @@ class _DateTimeSection extends StatelessWidget {
           child: _PickerField(
             icon: Icons.schedule_rounded,
             title: 'Pick-up Time',
-            value: '09:30 AM',
+            value: time,
+            onTap: onTime,
           ),
         ),
       ],
@@ -386,10 +476,12 @@ class _PickerField extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.value,
+    required this.onTap,
   });
   final IconData icon;
   final String title;
   final String value;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -412,7 +504,10 @@ class _PickerField extends StatelessWidget {
         ],
       ),
       const SizedBox(height: 7),
-      Container(
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
         height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 9),
         decoration: BoxDecoration(
@@ -433,6 +528,7 @@ class _PickerField extends StatelessWidget {
               size: 20,
             ),
           ],
+        ),
         ),
       ),
     ],
@@ -690,14 +786,14 @@ class _AdvanceNotice extends StatelessWidget {
 }
 
 class _ScheduleButton extends StatelessWidget {
-  const _ScheduleButton({required this.vehicle});
-  final String vehicle;
+  const _ScheduleButton({required this.onPressed});
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) => SizedBox(
     height: 58,
     child: FilledButton(
-      onPressed: () {},
+      onPressed: onPressed,
       style: FilledButton.styleFrom(
         backgroundColor: AppColors.orange,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -706,13 +802,13 @@ class _ScheduleButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Text(
-            'Schedule Ride',
+            'Choose Vehicle',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 2),
-          Text(
-            '$vehicle · You’ll receive a confirmation',
-            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500),
+          const Text(
+            'View live fares and available vehicle types',
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500),
           ),
         ],
       ),

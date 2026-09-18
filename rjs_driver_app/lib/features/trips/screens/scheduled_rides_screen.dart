@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/network/driver_api_service.dart';
+import '../../../core/location/driver_location_service.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
 import '../../../shared/widgets/driver_header_actions.dart';
 import '../../earnings/screens/earnings_screen.dart';
 import '../../home/screens/driver_home_screen.dart';
 import '../../profile/screens/driver_profile_screen.dart';
+import 'pickup_preview_screen.dart';
 
 class ScheduledRidesScreen extends StatefulWidget {
   const ScheduledRidesScreen({super.key});
@@ -17,7 +22,91 @@ class ScheduledRidesScreen extends StatefulWidget {
 
 class _ScheduledRidesScreenState extends State<ScheduledRidesScreen> {
   bool _isOnline = true;
+  List<Map<String, dynamic>> _bookings = const [];
+  bool _loading = true;
+  bool _fetching = false;
+  String? _error;
+  String? _startingId;
+  Timer? _timer;
 
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    if (_fetching) return;
+    _fetching = true;
+    try {
+      final trips = await DriverApiService.scheduledTrips();
+      final session = await DriverApiService.session();
+      if (mounted)
+        setState(() {
+          _bookings = trips;
+          _loading = false;
+          _error = null;
+          _isOnline = session?['driver']?['operationalStatus'] != 'OFFLINE';
+        });
+    } catch (error) {
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _error = error.toString();
+        });
+    } finally {
+      _fetching = false;
+    }
+  }
+
+  Future<void> _startPickup(Map<String, dynamic> trip) async {
+    if (_startingId != null) return;
+    setState(() => _startingId = trip['id'].toString());
+    try {
+      await DriverLocationService.prepareForAcceptedRide();
+      final updated = await DriverApiService.markEnRoute(trip['id'].toString());
+      await DriverLocationService.ensureRunning(updated);
+      if (mounted) _selectTab(0);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _startingId = null);
+    }
+  }
+
+  Future<void> _seeLocation(Map<String, dynamic> trip) async {
+    final started = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => PickupPreviewScreen(trip: trip)),
+    );
+    if (!mounted) return;
+    if (started == true)
+      _selectTab(0);
+    else
+      await _load();
+  }
+
+  Future<void> _toggleAvailability() async {
+    try {
+      await DriverApiService.setOnline(!_isOnline);
+      if (mounted) setState(() => _isOnline = !_isOnline);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  // Original visual reference; real rides are loaded from the backend below.
+  // ignore: unused_field
   static const _rides = [
     _ScheduledRide(
       '10:15\nAM',
@@ -103,23 +192,30 @@ class _ScheduledRidesScreenState extends State<ScheduledRidesScreen> {
               ),
               sliver: SliverList.list(
                 children: [
-                  const _UpcomingBanner(),
-                  const SizedBox(height: 15),
-                  const _DateHeading('Today  ·  24 May 2025'),
-                  const SizedBox(height: 9),
-                  ..._rides
-                      .take(3)
-                      .expand(
-                        (ride) => [
-                          _ScheduledRideCard(ride),
-                          const SizedBox(height: 10),
-                        ],
+                  if (_loading)
+                    const Center(child: CircularProgressIndicator()),
+                  if (_error != null) ...[
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                    TextButton(onPressed: _load, child: const Text('Retry')),
+                  ],
+                  if (!_loading && _error == null && _bookings.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(28),
+                      child: Text(
+                        'No assigned upcoming trips yet.',
+                        textAlign: TextAlign.center,
                       ),
-                  const _DateHeading('Tomorrow  ·  25 May 2025'),
-                  const SizedBox(height: 9),
-                  _ScheduledRideCard(_rides.last),
-                  const SizedBox(height: 11),
-                  const _NoteCard(),
+                    ),
+                  for (final trip in _bookings) ...[
+                    _AssignedTripCard(
+                      trip: trip,
+                      busy: _startingId != null,
+                      onStart: () => _startPickup(trip),
+                      onOpen: () => _selectTab(0),
+                      onSeeLocation: () => _seeLocation(trip),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                 ],
               ),
             ),
@@ -130,10 +226,179 @@ class _ScheduledRidesScreenState extends State<ScheduledRidesScreen> {
         selectedIndex: 1,
         isOnline: _isOnline,
         onSelected: _selectTab,
-        onStatusTap: () => setState(() => _isOnline = !_isOnline),
+        onStatusTap: _toggleAvailability,
       ),
     ),
   );
+}
+
+class _AssignedTripCard extends StatelessWidget {
+  const _AssignedTripCard({
+    required this.trip,
+    required this.busy,
+    required this.onStart,
+    required this.onOpen,
+    required this.onSeeLocation,
+  });
+  final Map<String, dynamic> trip;
+  final bool busy;
+  final VoidCallback onStart;
+  final VoidCallback onOpen;
+  final VoidCallback onSeeLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = DateTime.tryParse(trip['scheduledStartAt']?.toString() ?? '')
+        ?.toLocal();
+    final timeLabel = date == null
+        ? '--'
+        : '${MaterialLocalizations.of(context).formatMediumDate(date)} · ${TimeOfDay.fromDateTime(date).format(context)}';
+    final customer = trip['customer'] as Map? ?? const {};
+    final pickup = trip['pickup'] as Map? ?? const {};
+    final destination = trip['destination'] as Map?;
+    final status = trip['status']?.toString() ?? '';
+    final awaitingPickup = {'ASSIGNED', 'DRIVER_ACCEPTED'}.contains(status);
+    final now = DateTime.now();
+    final overdue =
+        awaitingPickup &&
+        (trip['pickupOverdue'] == true || (date != null && !date.isAfter(now)));
+    final canStart = !overdue && trip['canStartPickup'] == true && date != null;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFDDE5ED)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            timeLabel,
+            style: const TextStyle(
+              color: AppColors.blue,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            trip['bookingNumber']?.toString() ?? '',
+            style: const TextStyle(color: AppColors.muted, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            overdue ? 'PICKUP OVERDUE' : status.replaceAll('_', ' '),
+            style: TextStyle(
+              color: overdue ? AppColors.orange : AppColors.green,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Divider(height: 24),
+          const Text(
+            'Pickup',
+            style: TextStyle(color: AppColors.blue, fontSize: 12),
+          ),
+          Text(
+            pickup['address']?.toString() ?? '--',
+            style: const TextStyle(
+              color: AppColors.navy,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Customer: ${customer['name'] ?? '--'}',
+            style: const TextStyle(color: AppColors.navy),
+          ),
+          Text(
+            'Phone: ${customer['phone'] ?? '--'}',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${trip['vehicleVariant'] ?? ''} · ${trip['passengerCount'] ?? 1} passengers',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          const SizedBox(height: 12),
+          if (destination != null)
+            Text('Drop: ${destination['address'] ?? '--'}')
+          else
+            const Text(
+              'Drop location unlocks after trip OTP verification.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          const SizedBox(height: 14),
+          if (awaitingPickup) ...[
+            if (!overdue &&
+                date != null &&
+                !date.isAfter(now.add(const Duration(hours: 1))))
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Scheduled pickup is approaching. Go online and open See Location to prepare.',
+                  style: TextStyle(
+                    color: AppColors.blue,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            if (canStart)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Time to start toward pickup.',
+                  style: TextStyle(
+                    color: AppColors.green,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: busy ? null : onSeeLocation,
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('See Location'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: canStart && !busy ? onStart : null,
+                child: Text(
+                  busy
+                      ? 'Starting…'
+                      : overdue
+                      ? 'Pickup time passed'
+                      : 'Start to Pickup',
+                ),
+              ),
+            ),
+            if (!canStart)
+              Padding(
+                padding: const EdgeInsets.only(top: 7),
+                child: Text(
+                  overdue
+                      ? 'Contact RJS admin to resolve this booking. It has not been cancelled.'
+                      : 'Open See Location to check ETA and pickup availability (ETA + 15 min).',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+          ] else
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onOpen,
+                child: const Text('Open active trip'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TripsHeader extends StatelessWidget {

@@ -29,6 +29,8 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
   @override
   void initState() {
     super.initState();
+    _pickup = MapsService.cachedCurrentPlace;
+    _loadingPickup = _pickup == null;
     _loadCurrentPickup();
   }
 
@@ -224,7 +226,7 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
           markerId: const MarkerId('pickup'),
           position: LatLng(pickup.latitude, pickup.longitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange,
+            BitmapDescriptor.hueAzure,
           ),
         ),
       if (destination != null)
@@ -232,7 +234,7 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
           markerId: const MarkerId('destination'),
           position: LatLng(destination.latitude, destination.longitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueAzure,
+            BitmapDescriptor.hueOrange,
           ),
         ),
     };
@@ -244,9 +246,9 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
           Positioned.fill(
             child: GoogleMap(
               mapId: GoogleMapsConfig.mapId,
-              initialCameraPosition: const CameraPosition(
-                target: _bengaluru,
-                zoom: 12.5,
+              initialCameraPosition: CameraPosition(
+                target: pickup == null ? _bengaluru : LatLng(pickup.latitude, pickup.longitude),
+                zoom: pickup == null ? 12.5 : 15.5,
               ),
               padding: EdgeInsets.only(
                 bottom: 278 + MediaQuery.paddingOf(context).bottom,

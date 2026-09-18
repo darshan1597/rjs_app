@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 
 import { validate } from '../../common/middleware/validate.js';
@@ -12,8 +13,11 @@ import { VehicleCategory, VehicleVariant } from '../vehicles/vehicle.model.js';
 import { calculateLocalFare, fareBandFor } from '../bookings/local-fare.service.js';
 import { computeRoute } from '../maps/maps.service.js';
 import { closeQrCode, createOrder, fetchPayment, verifyCheckoutSignature } from '../payments/razorpay.service.js';
+import { createSingleFlight } from '../../common/single-flight.js';
+import { scheduledPickupState } from '../bookings/scheduled-pickup-policy.js';
 
 const router = express.Router();
+const paymentOrderFlight = createSingleFlight();
 const empty = z.object({});
 const createSchema = z.object({
   body: z.object({
@@ -26,6 +30,8 @@ const createSchema = z.object({
     categoryId: z.string().regex(/^[a-f\d]{24}$/i),
     variantId: z.string().regex(/^[a-f\d]{24}$/i),
     paymentMethod: z.enum(['UPI', 'CARD', 'NET_BANKING', 'WALLET']).optional(),
+    scheduledFor: z.string().refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid scheduled date').optional(),
+    idempotencyKey: z.string().regex(/^[a-zA-Z0-9_-]{16,100}$/).optional(),
   }),
   params: empty,
   query: empty,
@@ -83,7 +89,9 @@ const toCustomerBooking = (booking) => ({
   pickup: booking.pickup,
   destination: booking.destination,
   vehicleVariant: booking.requestedVehicleVariant,
-  amount: booking.totalAmount,
+  amount: booking.walletPaidAmount ?? booking.totalAmount,
+  walletDiscountAmount: booking.walletDiscountAmount,
+  walletPaymentAvailable: booking.status === 'PAYMENT_PENDING' && !booking.paymentChannel && !booking.razorpayOrderId && !booking.razorpayQrCodeId,
   pricing: booking.pricingSnapshot,
   status: booking.status,
   paymentStatus: booking.paymentStatus,
@@ -96,6 +104,7 @@ const toCustomerBooking = (booking) => ({
   createdAt: booking.createdAt,
   serviceType: booking.serviceType,
   timing: booking.timing,
+  pickupOverdue: scheduledPickupState(booking).pickupOverdue,
   scheduledStartAt: booking.scheduledStartAt,
   scheduledEndAt: booking.scheduledEndAt,
   estimatedDistanceKm: booking.estimatedDistanceKm,
@@ -108,6 +117,10 @@ const toCustomerBooking = (booking) => ({
     phone: booking.currentDriverId.personal?.phone,
     profilePhoto: booking.currentDriverId.personal?.profilePhoto,
     vehicle: booking.currentDriverId.vehicle,
+    currentLocation: booking.currentDriverId.currentLocation?.recordedAt
+      && Date.now() - new Date(booking.currentDriverId.currentLocation.recordedAt).getTime() <= 60000
+      ? booking.currentDriverId.currentLocation
+      : undefined,
   } : undefined,
   ...booking.status === 'ARRIVED' && booking.tripStartOtp ? { tripStartOtp: booking.tripStartOtp } : {},
 });
@@ -185,10 +198,32 @@ router.get('/vehicle-catalog', validate(catalogSchema), async (req, res, next) =
 });
 
 router.post('/', validate(createSchema), async (req, res, next) => {
+  const { idempotencyKey, ...requestBody } = req.validated.body;
+  const bookingRequestHash = crypto.createHash('sha256').update(JSON.stringify(requestBody)).digest('hex');
+  const replay = async () => {
+    if (!idempotencyKey) return null;
+    const existing = await Booking.findOne({ customerId: req.customer.id, bookingRequestKey: idempotencyKey }).populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle currentLocation');
+    if (existing && existing.bookingRequestHash !== bookingRequestHash) throw new AppError(409, 'IDEMPOTENCY_CONFLICT', 'Use a new retry key when changing booking details');
+    return existing;
+  };
   try {
+    const existing = await replay();
+    if (existing) return res.json({ success: true, data: { booking: toCustomerBooking(existing) } });
     const { pickupAddress, destinationAddress, pickupLatitude, pickupLongitude,
-      destinationLatitude, destinationLongitude, categoryId, variantId, paymentMethod } =
+      destinationLatitude, destinationLongitude, categoryId, variantId, paymentMethod, scheduledFor } =
       req.validated.body;
+
+    const scheduledStart = scheduledFor ? new Date(scheduledFor) : null;
+    if (scheduledStart) {
+      const minimum = Date.now() + 30 * 60 * 1000;
+      const maximum = Date.now() + 90 * 24 * 60 * 60 * 1000;
+      if (scheduledStart.getTime() < minimum) {
+        throw new AppError(422, 'SCHEDULE_TOO_SOON', 'Please schedule the ride at least 30 minutes in advance');
+      }
+      if (scheduledStart.getTime() > maximum) {
+        throw new AppError(422, 'SCHEDULE_TOO_FAR', 'Rides can be scheduled up to 90 days in advance');
+      }
+    }
 
     const [category, variant] = await Promise.all([
       VehicleCategory.findOne({ _id: categoryId, isActive: true }),
@@ -205,7 +240,7 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       'vehicle.variantId': variantId 
     });
 
-    if (!availableDriver) throw new AppError(409, 'NO_DRIVER_AVAILABLE', `No ${variant.name} driver is currently available`);
+    if (!scheduledStart && !availableDriver) throw new AppError(409, 'NO_DRIVER_AVAILABLE', `No ${variant.name} driver is currently available`);
 
     const route = await computeRoute({
       origin: { 
@@ -217,7 +252,7 @@ router.post('/', validate(createSchema), async (req, res, next) => {
         longitude: destinationLongitude 
       },
     });
-    const start = new Date();
+    const start = scheduledStart ?? new Date();
     const end = new Date(start.getTime() + Math.max(route.durationMinutes, 15) * 60 * 1000);
     const estimatedDistanceKm = route.distanceKm;
     const pricingSnapshot = calculateLocalFare({
@@ -226,11 +261,12 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       bookedAt: start,
     });
 
-    const booking = await Booking.create({
+    const booking = await Booking.createWithUniqueNumber({
+      ...(idempotencyKey ? { bookingRequestKey: idempotencyKey, bookingRequestHash } : {}),
       customerId: req.customer.id,
       customer: { name: req.customer.name, phone: req.customer.phone },
-      serviceType: 'IMMEDIATE_RIDE',
-      timing: 'IMMEDIATE',
+      serviceType: scheduledStart ? 'SCHEDULED_RIDE' : 'IMMEDIATE_RIDE',
+      timing: scheduledStart ? 'SCHEDULED' : 'IMMEDIATE',
       pickup: { 
         address: pickupAddress, 
         latitude: pickupLatitude, 
@@ -254,12 +290,12 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       paymentMethod,
       totalAmount: pricingSnapshot.totalFare,
       pricingSnapshot,
-      status: 'SEARCHING_DRIVER',
-      assignmentDeadline: new Date(Date.now() + 45 * 1000),
+      status: scheduledStart ? 'NEW' : 'SEARCHING_DRIVER',
+      assignmentDeadline: scheduledStart ? undefined : new Date(Date.now() + 45 * 1000),
       statusHistory: [
         { 
-          status: 'SEARCHING_DRIVER', 
-          note: 'Searching for a nearby driver' 
+          status: scheduledStart ? 'NEW' : 'SEARCHING_DRIVER',
+          note: scheduledStart ? 'Scheduled ride created; awaiting driver assignment' : 'Searching for a nearby driver',
         },
       ],
     });
@@ -269,6 +305,12 @@ router.post('/', validate(createSchema), async (req, res, next) => {
       data: { booking: toCustomerBooking(booking) },
     });
   } catch (error) {
+    if (idempotencyKey && error?.code === 11000 && error.keyPattern?.bookingRequestKey) {
+      try {
+        const existing = await replay();
+        if (existing) return res.json({ success: true, data: { booking: toCustomerBooking(existing) } });
+      } catch (replayError) { return next(replayError); }
+    }
     return next(error);
   }
 });
@@ -279,7 +321,7 @@ router.get('/', async (req, res, next) => {
     const bookings = await Booking.find({ customerId: req.customer.id })
       .sort({ createdAt: -1 })
       .limit(50)
-      .populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle');
+      .populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle currentLocation');
     return res.json({
       success: true,
       data: { bookings: bookings.map(toCustomerBooking) },
@@ -299,7 +341,7 @@ router.get('/:bookingId', validate(bookingIdSchema), async (req, res, next) => {
     const booking = await Booking.findOne({
       _id: req.validated.params.bookingId,
       customerId: req.customer.id,
-    }).select('+tripStartOtp').populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle');
+    }).select('+tripStartOtp').populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle currentLocation');
 
     if (!booking) {
       throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking was not found');
@@ -314,21 +356,109 @@ router.get('/:bookingId', validate(bookingIdSchema), async (req, res, next) => {
   }
 });
 
-router.post('/:bookingId/payment-order', validate(bookingIdSchema), async (req, res, next) => {
+router.get('/:bookingId/receipt', validate(bookingIdSchema), async (req, res, next) => {
   try {
     const booking = await Booking.findOne({
       _id: req.validated.params.bookingId,
       customerId: req.customer.id,
+      status: 'COMPLETED',
+      paymentStatus: 'PAID',
+    }).populate('currentDriverId', 'personal.fullName vehicle.registrationNumber');
+
+    if (!booking) {
+      throw new AppError(404, 'RECEIPT_NOT_AVAILABLE', 'A receipt is available only after this ride is paid');
+    }
+
+    const payment = await Payment.findOne({
+      bookingId: booking._id,
+      status: { $in: ['PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'] },
+    }).sort({ paidAt: -1, createdAt: -1 }).lean();
+
+    if (!payment) {
+      throw new AppError(404, 'RECEIPT_NOT_AVAILABLE', 'The payment receipt is still being prepared');
+    }
+
+    const pricing = booking.pricingSnapshot?.toObject?.() ?? booking.pricingSnapshot ?? {};
+    const driver = booking.currentDriverId && typeof booking.currentDriverId === 'object'
+      ? booking.currentDriverId
+      : null;
+
+    return res.json({
+      success: true,
+      data: {
+        receipt: {
+          receiptNumber: `RCP-${booking.bookingNumber}`,
+          bookingNumber: booking.bookingNumber,
+          issuedAt: payment.paidAt ?? payment.updatedAt ?? payment.createdAt,
+          payment: {
+            status: payment.status,
+            method: payment.method,
+            methodDisplay: payment.methodDisplay,
+            transactionId: payment.transactionId,
+            razorpayPaymentId: payment.razorpayPaymentId,
+            razorpayOrderId: payment.razorpayOrderId,
+            amount: payment.amount,
+            currency: 'INR',
+          },
+          customer: booking.customer,
+          ride: {
+            serviceType: booking.serviceType,
+            vehicleVariant: booking.requestedVehicleVariant,
+            pickup: booking.pickup,
+            destination: booking.destination,
+            startedAt: booking.startedAt,
+            completedAt: booking.completedAt,
+            distanceKm: booking.estimatedDistanceKm,
+            driverName: driver?.personal?.fullName,
+            vehicleRegistrationNumber: driver?.vehicle?.registrationNumber,
+          },
+          fare: {
+            minimumFare: pricing.minimumFare ?? 0,
+            distanceFare: pricing.distanceFare ?? 0,
+            waitingMinutes: pricing.waitingMinutes ?? 0,
+            freeWaitingMinutes: pricing.freeWaitingMinutes ?? 0,
+            chargeableWaitingMinutes: pricing.chargeableWaitingMinutes ?? 0,
+            waitingCharge: pricing.waitingCharge ?? 0,
+            nightSurcharge: pricing.nightSurcharge ?? 0,
+            tollCharge: pricing.tollCharge ?? 0,
+            parkingCharge: pricing.parkingCharge ?? 0,
+            taxableSubtotal: pricing.taxableSubtotal ?? 0,
+            gstPercent: pricing.gstPercent ?? 0,
+            gstAmount: pricing.gstAmount ?? 0,
+            originalTotal: booking.totalAmount,
+            walletDiscount: booking.walletDiscountAmount ?? 0,
+            total: payment.amount,
+          },
+          merchant: { name: 'RJS Tours and Travels' },
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/:bookingId/payment-order', validate(bookingIdSchema), async (req, res, next) => {
+  try {
+    const booking = await Booking.findOneAndUpdate({
+      _id: req.validated.params.bookingId,
+      customerId: req.customer.id,
       status: 'PAYMENT_PENDING',
       paymentStatus: 'PENDING',
-    });
+      paymentChannel: { $ne: 'WALLET' },
+    }, { $set: { paymentChannel: 'RAZORPAY' } }, { new: true });
 
     if (!booking) throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'The final trip bill is not ready for payment');
 
     if (!booking.razorpayOrderId) {
-      const order = await createOrder(booking);
-      booking.razorpayOrderId = order.id;
-      await booking.save();
+      booking.razorpayOrderId = await paymentOrderFlight(booking.id, async () => {
+        const fresh = await Booking.findById(booking._id);
+        if (fresh.razorpayOrderId) return fresh.razorpayOrderId;
+        if (fresh.status !== 'PAYMENT_PENDING' || fresh.paymentStatus !== 'PENDING') throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'This ride is no longer awaiting payment');
+        const order = await createOrder(fresh);
+        await Booking.updateOne({ _id: booking._id }, { $set: { razorpayOrderId: order.id } });
+        return order.id;
+      });
     }
 
     return res.json({
@@ -462,38 +592,6 @@ router.post('/:bookingId/retry-search', validate(bookingIdSchema), async (req, r
   } catch (error) {
     return next(error);
   }
-});
-
-router.post('/:bookingId/confirm-test-payment', validate(bookingIdSchema), async (req, res, next) => {
-  try {
-    if (env.NODE_ENV === 'production') throw new AppError(404, 'NOT_FOUND', 'This route is unavailable');
-    const booking = await Booking.findOneAndUpdate(
-      { _id: req.validated.params.bookingId, customerId: req.customer.id, status: 'AWAITING_PAYMENT', paymentStatus: 'PENDING' },
-      {
-        $set: { status: 'PAYMENT_CONFIRMED', paymentStatus: 'PAID', paymentMethod: 'UPI' },
-        $push: { statusHistory: { status: 'PAYMENT_CONFIRMED', note: 'Development test payment confirmed' } },
-      },
-      { new: true, runValidators: true },
-    ).populate('currentDriverId', 'personal.fullName personal.phone personal.profilePhoto vehicle');
-
-    if (!booking) throw new AppError(409, 'PAYMENT_NOT_AVAILABLE', 'This booking is not waiting for payment');
-
-    await Payment.create({
-      transactionId: `DEV-${booking.bookingNumber}`,
-      bookingId: booking.id,
-      customerName: booking.customer.name,
-      customerPhone: booking.customer.phone,
-      bookingType: booking.serviceType,
-      method: 'UPI',
-      methodDisplay: 'Development test payment',
-      gatewayReference: `DEV-${Date.now()}`,
-      amount: booking.totalAmount,
-      status: 'PAID',
-      paidAt: new Date(),
-    });
-
-    return res.json({ success: true, data: { booking: toCustomerBooking(booking) } });
-  } catch (error) { return next(error); }
 });
 
 router.post('/:bookingId/cancel', validate(bookingIdSchema), async (req, res, next) => {

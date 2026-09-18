@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'rate_limit_backoff.dart';
+
 class DriverApiException implements Exception {
   const DriverApiException(this.code, this.message, this.statusCode);
 
@@ -25,10 +27,26 @@ class DriverApiService {
     if (path == null || path.isEmpty) return '';
     return path.startsWith('http') ? path : '$_base$path';
   }
+
   static Future<bool>? _refreshInProgress;
+  static Uri _apiUri(String path, String method) {
+    final uri = Uri.parse('$_base/api/v1/$path');
+    RateLimitBackoff.check(method, uri);
+    return uri;
+  }
 
   static Map<String, dynamic> _decode(http.Response response) {
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    RateLimitBackoff.record(response);
+    Map<String, dynamic> decoded;
+    try {
+      decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw DriverApiException(
+        'INVALID_RESPONSE',
+        'The server is temporarily unavailable. Please try again later.',
+        response.statusCode,
+      );
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw DriverApiException(
         decoded['error']?['code']?.toString() ?? 'REQUEST_FAILED',
@@ -43,15 +61,17 @@ class DriverApiService {
   static Future<Map<String, dynamic>> _post(
     String path,
     Map<String, dynamic> body,
-  ) async => _decode(
-    await http
-        .post(
-          Uri.parse('$_base/api/v1/$path'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 15)),
-  );
+  ) async {
+    return _decode(
+      await http
+          .post(
+            _apiUri(path, 'POST'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15)),
+    );
+  }
 
   static Future<void> requestOtp(String phone) async {
     await _post('driver/auth/request-otp', {'phone': phone});
@@ -129,7 +149,7 @@ class DriverApiService {
   static Future<Map<String, dynamic>> get(String path) async => _decode(
     await _authorized(
       (headers) => http
-          .get(Uri.parse('$_base/api/v1/$path'), headers: headers)
+          .get(_apiUri(path, 'GET'), headers: headers)
           .timeout(const Duration(seconds: 15)),
     ),
   );
@@ -140,11 +160,7 @@ class DriverApiService {
   ]) async => _decode(
     await _authorized(
       (headers) => http
-          .post(
-            Uri.parse('$_base/api/v1/$path'),
-            headers: headers,
-            body: jsonEncode(body),
-          )
+          .post(_apiUri(path, 'POST'), headers: headers, body: jsonEncode(body))
           .timeout(const Duration(seconds: 15)),
     ),
   );
@@ -154,9 +170,54 @@ class DriverApiService {
       await _authorized(
         (headers) => http
             .patch(
-              Uri.parse('$_base/api/v1/driver/trips/availability'),
+              _apiUri('driver/trips/availability', 'PATCH'),
               headers: headers,
               body: jsonEncode({'status': online ? 'ONLINE' : 'OFFLINE'}),
+            )
+            .timeout(const Duration(seconds: 15)),
+      ),
+    );
+    final cached = await session();
+    if (cached != null && cached['driver'] is Map) {
+      cached['driver']['operationalStatus'] = online ? 'ONLINE' : 'OFFLINE';
+      await _saveSession(cached);
+    }
+    if (online) {
+      // One preparation update, not continuous idle/scheduled tracking.
+      try {
+        await updateCurrentLocation(requestPermission: false);
+      } catch (_) {}
+    }
+  }
+
+  static Future<void> updateCurrentLocation({
+    bool requestPermission = true,
+  }) async {
+    if (!await Geolocator.isLocationServiceEnabled()) return;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied && requestPermission) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever)
+      return;
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+    await _decode(
+      await _authorized(
+        (headers) => http
+            .patch(
+              _apiUri('driver/trips/location', 'PATCH'),
+              headers: headers,
+              body: jsonEncode({
+                'latitude': position.latitude,
+                'longitude': position.longitude,
+                'accuracyMetres': position.accuracy,
+                'heading': position.heading < 0 ? 0 : position.heading,
+                'speedMetresPerSecond': position.speed < 0 ? 0 : position.speed,
+                'recordedAt': position.timestamp.toUtc().toIso8601String(),
+              }),
             )
             .timeout(const Duration(seconds: 15)),
       ),
@@ -197,10 +258,52 @@ class DriverApiService {
     return data['trip'] as Map<String, dynamic>?;
   }
 
+  static Future<List<Map<String, dynamic>>> scheduledTrips() async {
+    final data = await get('driver/trips/scheduled');
+    return (data['trips'] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>();
+  }
+
   static Future<Map<String, dynamic>> markEnRoute(String bookingId) async {
-    final data = await post('driver/trips/$bookingId/en-route');
+    final data = await post(
+      'driver/trips/$bookingId/en-route',
+      await pickupLocation(),
+    );
     return data['trip'] as Map<String, dynamic>;
   }
+
+  static Future<Map<String, dynamic>> pickupLocation({bool requirePrecise = false}) async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw Exception('Turn on phone location');
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      throw Exception('Location permission is required');
+    }
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    ).timeout(const Duration(seconds: 15));
+    if (requirePrecise) {
+      final age = DateTime.now().difference(position.timestamp);
+      if (age > const Duration(seconds: 30) ||
+          age < const Duration(seconds: -30) ||
+          !position.accuracy.isFinite || position.accuracy < 0 || position.accuracy > 50) {
+        throw Exception('Your GPS location is not accurate enough yet. Enable precise location, move outdoors, and try again.');
+      }
+    }
+    return {
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'recordedAt': position.timestamp.toUtc().toIso8601String(),
+    };
+  }
+
+  static Future<Map<String, dynamic>> pickupPreview(String bookingId) async =>
+      post('driver/trips/$bookingId/pickup-preview', await pickupLocation());
 
   static Future<Map<String, dynamic>> markArrived(String bookingId) async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -210,7 +313,8 @@ class DriverApiService {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
       throw Exception('Location permission is required to mark arrived');
     }
     final position = await Geolocator.getCurrentPosition(
@@ -228,6 +332,11 @@ class DriverApiService {
     String otp,
   ) async {
     final data = await post('driver/trips/$bookingId/start', {'otp': otp});
+    return data['trip'] as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> paymentQr(String bookingId) async {
+    final data = await post('driver/trips/$bookingId/payment-qr', {});
     return data['trip'] as Map<String, dynamic>;
   }
 

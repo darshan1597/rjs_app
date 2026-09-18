@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'rate_limit_backoff.dart';
+
 class CustomerAuthService {
   static const _base = String.fromEnvironment(
     'API_BASE_URL',
@@ -18,11 +20,14 @@ class CustomerAuthService {
       path.startsWith('http') ? path : '$_base$path';
 
   static Map<String, dynamic> _decode(http.Response response) {
+    RateLimitBackoff.record(response);
     Map<String, dynamic> decoded;
     try {
       decoded = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw Exception('The server returned an invalid response');
+      throw Exception(
+        'The server is temporarily unavailable. Please try again later.',
+      );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
@@ -36,6 +41,7 @@ class CustomerAuthService {
     String path,
     Map<String, dynamic> body,
   ) async {
+    RateLimitBackoff.check('POST', _uri(path));
     final response = await http
         .post(
           _uri(path),
@@ -115,6 +121,7 @@ class CustomerAuthService {
     Map<String, dynamic>? body,
     bool retryAfterRefresh = true,
   }) async {
+    RateLimitBackoff.check(method, _apiUri(path));
     final session = await _loadSession();
     final accessToken = session?['tokens']?['accessToken'] as String?;
     if (accessToken == null) return null;

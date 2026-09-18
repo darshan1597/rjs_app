@@ -8,8 +8,11 @@ import { env } from '../../config/env.js';
 import { DriverOtp, DriverSession } from './driver-auth.model.js';
 import { authenticateDriver } from './driver-auth.middleware.js';
 import { Driver } from './driver.model.js';
+import { createOtpLimiters } from '../../common/middleware/rate-limits.js';
 
 const router = express.Router();
+const otpLimits = createOtpLimiters();
+router.post(['/request-otp', '/verify-otp'], otpLimits.ip);
 const empty = z.object({});
 const phone = z.string().trim().regex(/^\d{10}$/);
 const requestSchema = z.object({ body: z.object({ phone }), params: empty, query: empty });
@@ -53,7 +56,7 @@ async function createSession(driver, req) {
   };
 }
 
-router.post('/request-otp', validate(requestSchema), async (req, res, next) => {
+router.post('/request-otp', validate(requestSchema), otpLimits.request, async (req, res, next) => {
   try {
     const phoneNumber = req.validated.body.phone;
     const normalized = `+91${phoneNumber}`;
@@ -73,7 +76,7 @@ router.post('/request-otp', validate(requestSchema), async (req, res, next) => {
   }
 });
 
-router.post('/verify-otp', validate(verifySchema), async (req, res, next) => {
+router.post('/verify-otp', validate(verifySchema), otpLimits.verify, async (req, res, next) => {
   try {
     const normalized = `+91${req.validated.body.phone}`;
     const challenge = await DriverOtp.findOne({ phone: normalized, consumedAt: null, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 });

@@ -11,10 +11,11 @@ function requireConfig() {
   }
 }
 
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, signal } = {}) {
   requireConfig();
   const response = await fetch(`${endpoint}${path}`, {
     method,
+    ...(signal ? { signal } : {}),
     headers: {
       Authorization: `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64')}`,
       'Content-Type': 'application/json',
@@ -58,6 +59,16 @@ function createQrCode(booking) {
   });
 }
 
+function createWalletOrder(topup) {
+  return request('/orders', { method: 'POST', body: {
+    amount: topup.amountPaise, currency: 'INR', receipt: `WLT-${topup.id}`,
+    notes: { walletTopupId: topup.id },
+  } });
+}
+function fetchOrderPayments(orderId) {
+  return request(`/orders/${encodeURIComponent(orderId)}/payments`, { signal: AbortSignal.timeout(12000) });
+}
+
 function fetchPayment(paymentId) {
   return request(`/payments/${encodeURIComponent(paymentId)}`);
 }
@@ -86,4 +97,4 @@ function verifyWebhookSignature(rawBody, signature) {
     && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }
 
-export { closeQrCode, createOrder, createQrCode, fetchPayment, verifyCheckoutSignature, verifyWebhookSignature };
+export { closeQrCode, createOrder, createQrCode, createWalletOrder, fetchOrderPayments, fetchPayment, verifyCheckoutSignature, verifyWebhookSignature };

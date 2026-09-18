@@ -1,16 +1,28 @@
 import express from 'express';
 
 import { Booking } from '../bookings/booking.model.js';
-import { Payment } from './payment.model.js';
+import { Payment, RazorpayWebhookEvent } from './payment.model.js';
 import { Driver } from '../drivers/driver.model.js';
 import { closeQrCode, verifyWebhookSignature } from './razorpay.service.js';
+import { creditTopup } from '../wallets/wallet.service.js';
 
 const router = express.Router();
+const paymentMethod = (method) => ({
+  upi: 'UPI', card: 'CARD', netbanking: 'NET_BANKING', wallet: 'WALLET',
+}[method] || 'CARD');
+const bookingReferences = (payment) => {
+  const references = [];
+  if (payment.notes?.bookingId) references.push({ _id: payment.notes.bookingId });
+  if (payment.order_id) references.push({ razorpayOrderId: payment.order_id });
+  if (payment.qr_code_id) references.push({ razorpayQrCodeId: payment.qr_code_id });
+  return references;
+};
 
 async function settlePayment({ payment, eventId }) {
-  const notes = payment.notes || {};
+  const references = bookingReferences(payment);
+  if (references.length === 0) return;
   const booking = await Booking.findOne({
-    _id: notes.bookingId,
+    $or: references,
     status: 'PAYMENT_PENDING',
     paymentStatus: 'PENDING',
   });
@@ -24,7 +36,7 @@ async function settlePayment({ payment, eventId }) {
         razorpayPaymentId: payment.id,
         razorpayOrderId: payment.order_id,
         gatewayReference: eventId,
-        method: 'UPI',
+        method: paymentMethod(payment.method),
         methodDisplay: payment.method || 'Razorpay',
         amount: booking.totalAmount,
         status: 'PAID',
@@ -33,12 +45,13 @@ async function settlePayment({ payment, eventId }) {
         customerPhone: booking.customer.phone,
         bookingType: booking.serviceType,
       },
+      $unset: { failedAt: 1, failureCode: 1, failureReason: 1, failureDescription: 1 },
     },
     { upsert: true, new: true, runValidators: true },
   );
   booking.status = 'COMPLETED';
   booking.paymentStatus = 'PAID';
-  booking.paymentMethod = 'UPI';
+  booking.paymentMethod = paymentMethod(payment.method);
   booking.statusHistory.push({ status: 'COMPLETED', note: 'Razorpay captured the final trip payment' });
   await booking.save();
   if (booking.razorpayQrCodeId && payment.qr_code_id !== booking.razorpayQrCodeId) {
@@ -47,17 +60,88 @@ async function settlePayment({ payment, eventId }) {
   await Driver.updateOne({ _id: booking.currentDriverId }, { $set: { operationalStatus: 'ONLINE' } });
 }
 
+async function recordFailedPayment({ payment, eventId }) {
+  const references = bookingReferences(payment);
+  if (references.length === 0) return;
+  const booking = await Booking.findOne({
+    $or: references,
+    status: 'PAYMENT_PENDING',
+    paymentStatus: 'PENDING',
+  });
+  if (!booking) return;
+  await Payment.findOneAndUpdate(
+    { bookingId: booking._id },
+    {
+      $set: {
+        transactionId: payment.id,
+        razorpayPaymentId: payment.id,
+        razorpayOrderId: payment.order_id,
+        gatewayReference: eventId,
+        method: paymentMethod(payment.method),
+        methodDisplay: `Razorpay ${payment.method || 'payment'}`,
+        amount: booking.totalAmount,
+        status: 'FAILED',
+        failedAt: new Date(),
+        failureCode: payment.error_code,
+        failureReason: payment.error_reason,
+        failureDescription: payment.error_description,
+        customerName: booking.customer.name,
+        customerPhone: booking.customer.phone,
+        bookingType: booking.serviceType,
+      },
+      $unset: { paidAt: 1 },
+    },
+    { upsert: true, new: true, runValidators: true },
+  );
+}
+
 router.post('/', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res, next) => {
+  let eventRecord;
   try {
     const signature = req.get('X-Razorpay-Signature') || '';
     if (!verifyWebhookSignature(req.body, signature)) return res.status(401).json({ success: false });
     const payload = JSON.parse(req.body.toString('utf8'));
-    if (['payment.captured', 'order.paid'].includes(payload.event)) {
-      const payment = payload.payload?.payment?.entity;
-      if (payment?.status === 'captured') await settlePayment({ payment, eventId: req.get('x-razorpay-event-id') });
+    const eventId = req.get('x-razorpay-event-id');
+    if (!eventId) return res.status(400).json({ success: false, error: 'Missing event id' });
+    try {
+      eventRecord = await RazorpayWebhookEvent.create({
+        eventId,
+        eventType: payload.event,
+      });
+    } catch (error) {
+      if (error?.code === 11000) return res.json({ success: true, duplicate: true });
+      throw error;
     }
+    if (['payment.captured', 'order.paid', 'qr_code.credited'].includes(payload.event)) {
+      const entity = payload.payload?.payment?.entity;
+      const qrId = payload.payload?.qr_code?.entity?.id;
+      const payment = entity && { ...entity, ...(payload.event === 'qr_code.credited' && qrId ? { qr_code_id: qrId } : {}) };
+      if (payment?.status === 'captured') {
+        if (!await creditTopup(payment)) await settlePayment({ payment, eventId });
+        eventRecord.paymentId = payment.id;
+        eventRecord.status = 'PROCESSED';
+      } else {
+        eventRecord.status = 'IGNORED';
+      }
+    } else if (payload.event === 'payment.failed') {
+      const payment = payload.payload?.payment?.entity;
+      if (payment) {
+        await recordFailedPayment({ payment, eventId });
+        eventRecord.paymentId = payment.id;
+        eventRecord.status = 'PROCESSED';
+      } else {
+        eventRecord.status = 'IGNORED';
+      }
+    } else {
+      eventRecord.status = 'IGNORED';
+    }
+    eventRecord.processedAt = new Date();
+    await eventRecord.save();
     return res.json({ success: true });
-  } catch (error) { return next(error); }
+  } catch (error) {
+    if (eventRecord?._id) await RazorpayWebhookEvent.deleteOne({ _id: eventRecord._id }).catch(() => {});
+    return next(error);
+  }
 });
 
 export { router as razorpayWebhookRouter };

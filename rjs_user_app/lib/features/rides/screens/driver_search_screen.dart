@@ -3,9 +3,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../../core/config/google_maps_config.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../location/models/map_place.dart';
+import '../../location/services/maps_service.dart';
 import '../services/customer_booking_service.dart';
+import '../../wallet/services/wallet_service.dart';
 
 Widget _vehicleImage(String source) => source.startsWith('http')
     ? Image.network(
@@ -47,6 +52,14 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   bool _paying = false;
   bool _timedOut = false;
   bool _refreshInFlight = false;
+  GoogleMapController? _liveMapController;
+  LatLng? _lastFramedDriverPoint;
+  LatLng? _lastRoutedDriverPoint;
+  DateTime? _lastRouteRefresh;
+  List<LatLng> _pickupRoutePoints = const [];
+  int? _pickupEtaMinutes;
+  bool _routeRefreshInFlight = false;
+  BitmapDescriptor? _driverCarIcon;
   late final Razorpay _razorpay;
 
   List<String> get _messages => [
@@ -61,6 +74,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _booking = widget.booking;
+    _loadDriverCarIcon();
     _razorpay = Razorpay()
       ..on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess)
       ..on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
@@ -137,6 +151,8 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
           _booking = booking;
           _timedOut = status == 'NO_DRIVER_AVAILABLE';
         });
+        unawaited(_frameLiveDriver());
+        if (status == 'DRIVER_EN_ROUTE') unawaited(_refreshPickupRoute());
         if (accepted) {
           _searchProgress.stop();
           _messageTimer?.cancel();
@@ -150,6 +166,126 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     } finally {
       _refreshInFlight = false;
     }
+  }
+
+  Future<void> _loadDriverCarIcon() async {
+    final icon = await BitmapDescriptor.asset(
+      const ImageConfiguration(size: Size(54, 54)),
+      'assets/images/popup-car.png',
+      width: 54,
+      height: 54,
+    );
+    if (mounted) setState(() => _driverCarIcon = icon);
+  }
+
+  double _metresBetween(LatLng first, LatLng second) {
+    const earthRadius = 6371000.0;
+    final latitudeDelta = (second.latitude - first.latitude) * math.pi / 180;
+    final longitudeDelta = (second.longitude - first.longitude) * math.pi / 180;
+    final firstLatitude = first.latitude * math.pi / 180;
+    final secondLatitude = second.latitude * math.pi / 180;
+    final value = math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
+        math.cos(firstLatitude) * math.cos(secondLatitude) *
+            math.sin(longitudeDelta / 2) * math.sin(longitudeDelta / 2);
+    return earthRadius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value));
+  }
+
+  Future<void> _refreshPickupRoute() async {
+    if (_routeRefreshInFlight || _status != 'DRIVER_EN_ROUTE') return;
+    final pickup = _pointFrom(_booking['pickup']);
+    final driver = _pointFrom((_booking['driver'] as Map?)?['currentLocation']);
+    if (pickup == null || driver == null) return;
+    final now = DateTime.now();
+    if (_lastRouteRefresh != null && now.difference(_lastRouteRefresh!).inSeconds < 15) return;
+    if (_lastRoutedDriverPoint != null &&
+        _metresBetween(_lastRoutedDriverPoint!, driver) < 50 &&
+        _lastRouteRefresh != null && now.difference(_lastRouteRefresh!).inSeconds < 45) return;
+    _routeRefreshInFlight = true;
+    _lastRouteRefresh = now;
+    try {
+      final route = await MapsService.route(
+        origin: MapPlace(address: 'Driver location', latitude: driver.latitude, longitude: driver.longitude),
+        destination: MapPlace(address: 'Pickup', latitude: pickup.latitude, longitude: pickup.longitude),
+      );
+      if (!mounted || _status != 'DRIVER_EN_ROUTE') return;
+      setState(() {
+        _pickupRoutePoints = _decodePolyline(route['encodedPolyline']?.toString() ?? '');
+        _pickupEtaMinutes = (route['durationMinutes'] as num?)?.ceil();
+        _lastRoutedDriverPoint = driver;
+      });
+      await _frameLiveDriver(force: true);
+    } catch (_) {
+      // Keep the latest valid route during a temporary routing failure.
+    } finally {
+      _routeRefreshInFlight = false;
+    }
+  }
+
+  List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    var index = 0;
+    var latitude = 0;
+    var longitude = 0;
+    while (index < encoded.length) {
+      var shift = 0;
+      var result = 0;
+      int byte;
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+      latitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      shift = 0;
+      result = 0;
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+      longitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      points.add(LatLng(latitude / 1e5, longitude / 1e5));
+    }
+    return points;
+  }
+
+  LatLng? _pointFrom(dynamic value) {
+    if (value is! Map || value['latitude'] is! num || value['longitude'] is! num) return null;
+    return LatLng((value['latitude'] as num).toDouble(), (value['longitude'] as num).toDouble());
+  }
+
+  Future<void> _frameLiveDriver({bool force = false}) async {
+    final controller = _liveMapController;
+    final pickup = _pointFrom(_booking['pickup']);
+    final driver = _pointFrom((_booking['driver'] as Map?)?['currentLocation']);
+    if (controller == null || pickup == null || driver == null) return;
+    final previous = _lastFramedDriverPoint;
+    if (!force && previous != null) {
+      final moved = (previous.latitude - driver.latitude).abs() +
+          (previous.longitude - driver.longitude).abs();
+      if (moved < 0.00008) return;
+    }
+    _lastFramedDriverPoint = driver;
+    if ((pickup.latitude - driver.latitude).abs() < 0.0001 &&
+        (pickup.longitude - driver.longitude).abs() < 0.0001) {
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(driver, 16));
+      return;
+    }
+    await controller.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(
+            math.min(pickup.latitude, driver.latitude),
+            math.min(pickup.longitude, driver.longitude),
+          ),
+          northeast: LatLng(
+            math.max(pickup.latitude, driver.latitude),
+            math.max(pickup.longitude, driver.longitude),
+          ),
+        ),
+        72,
+      ),
+    );
   }
 
   Future<void> _retry() async {
@@ -277,6 +413,42 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     }
   }
 
+  Future<void> _payWallet() async {
+    if (_paying) return;
+    setState(() => _paying = true);
+    try {
+      final quote = await WalletService.quote(_bookingId);
+      if (!mounted) return;
+      if (quote['available'] != true) throw Exception('Razorpay checkout or driver QR has already started. Please complete that payment.');
+      final payable = (quote['payablePaise'] as num).toInt();
+      final balance = (quote['balancePaise'] as num).toInt();
+      if (balance < payable) {
+        final addMoney = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('Insufficient wallet balance'),
+          content: Text('Balance: ₹${(balance / 100).toStringAsFixed(2)}\nPayable after 5% discount: ₹${(payable / 100).toStringAsFixed(2)}'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add money'))],
+        ));
+        if (mounted && addMoney == true) await Navigator.pushNamed(context, '/wallet');
+        return;
+      }
+      final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Pay with RJS Wallet'),
+        content: Text('Ride bill: ₹${((quote['grossPaise'] as num) / 100).toStringAsFixed(2)}\n5% discount: ₹${((quote['discountPaise'] as num) / 100).toStringAsFixed(2)}\nPay: ₹${(payable / 100).toStringAsFixed(2)}'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Pay now'))],
+      ));
+      if (confirmed != true) return;
+      await WalletService.pay(_bookingId);
+      final booking = await CustomerBookingService.getById(_bookingId);
+      if (mounted) setState(() => _booking = booking);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
   void _onPaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
     setState(() => _paying = false);
@@ -293,23 +465,21 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     }
   }
 
-  String get _mapStatusMessage => switch (_status) {
-    'DRIVER_ACCEPTED' => 'Driver found and heading to your pickup.',
-    'DRIVER_EN_ROUTE' => 'Your driver is on the way to you.',
-    'ARRIVED' => 'Your driver has arrived at the pickup.',
-    'IN_PROGRESS' => 'Trip in progress. Have a safe journey!',
-    'PAYMENT_PENDING' => 'Trip complete. Please pay the final bill.',
-    'COMPLETED' => 'You have reached your destination.',
-    'NO_DRIVER_AVAILABLE' => 'No driver accepted the ride in time.',
-    _ => _timedOut
-        ? 'No driver accepted the ride in time.'
-        : _messages[_messageIndex],
-  };
-
   @override
   Widget build(BuildContext context) {
     final pickup = _booking['pickup'] as Map<String, dynamic>?;
     final destination = _booking['destination'] as Map<String, dynamic>?;
+    final driver = _booking['driver'] as Map<String, dynamic>?;
+    final driverLocation = driver?['currentLocation'] as Map<String, dynamic>?;
+    final pickupPoint = pickup?['latitude'] is num && pickup?['longitude'] is num
+        ? LatLng((pickup!['latitude'] as num).toDouble(), (pickup['longitude'] as num).toDouble())
+        : null;
+    final destinationPoint = destination?['latitude'] is num && destination?['longitude'] is num
+        ? LatLng((destination!['latitude'] as num).toDouble(), (destination['longitude'] as num).toDouble())
+        : null;
+    final driverPoint = driverLocation?['latitude'] is num && driverLocation?['longitude'] is num
+        ? LatLng((driverLocation!['latitude'] as num).toDouble(), (driverLocation['longitude'] as num).toDouble())
+        : null;
     return PopScope(
       canPop: _accepted,
       onPopInvokedWithResult: (didPop, result) {
@@ -325,13 +495,53 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: Image.asset(
-                        'assets/images/home-map-placeholder.png',
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    Positioned.fill(
-                      child: CustomPaint(painter: _SearchRoutePainter()),
+                      child: pickupPoint == null
+                          ? Image.asset('assets/images/home-map-placeholder.png', fit: BoxFit.cover)
+                          : GoogleMap(
+                              mapId: GoogleMapsConfig.mapId,
+                              onMapCreated: (controller) {
+                                _liveMapController = controller;
+                                unawaited(_frameLiveDriver(force: true));
+                              },
+                              initialCameraPosition: CameraPosition(target: driverPoint ?? pickupPoint, zoom: 15),
+                              myLocationButtonEnabled: false,
+                              zoomControlsEnabled: false,
+                              mapToolbarEnabled: false,
+                              markers: {
+                                Marker(
+                                  markerId: const MarkerId('pickup'),
+                                  position: pickupPoint,
+                                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                                ),
+                                if (destinationPoint != null && _status != 'DRIVER_EN_ROUTE')
+                                  Marker(
+                                    markerId: const MarkerId('destination'),
+                                    position: destinationPoint,
+                                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+                                  ),
+                                if (driverPoint != null)
+                                  Marker(
+                                    markerId: const MarkerId('driver-live'),
+                                    position: driverPoint,
+                                    icon: _driverCarIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                                    rotation: (driverLocation?['heading'] as num?)?.toDouble() ?? 0,
+                                    flat: true,
+                                    infoWindow: const InfoWindow(title: 'Your driver'),
+                                  ),
+                              },
+                              polylines: {
+                                if (_status == 'DRIVER_EN_ROUTE' && _pickupRoutePoints.isNotEmpty)
+                                  Polyline(
+                                    polylineId: const PolylineId('driver-to-pickup'),
+                                    points: _pickupRoutePoints,
+                                    color: AppColors.blue,
+                                    width: 6,
+                                    startCap: Cap.roundCap,
+                                    endCap: Cap.roundCap,
+                                    jointType: JointType.round,
+                                  ),
+                              },
+                            ),
                     ),
                     Positioned(
                       left: 16,
@@ -353,45 +563,31 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                         ],
                       ),
                     ),
+                    if (_status == 'DRIVER_EN_ROUTE' && _pickupEtaMinutes != null)
                     Positioned(
-                      left: 115,
-                      top: 190,
+                      left: 0,
+                      right: 0,
+                      top: 118,
+                      child: Center(
                       child: Container(
-                        width: 180,
-                        padding: const EdgeInsets.all(13),
+                        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
                         decoration: BoxDecoration(
                           color: AppColors.navy,
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: const [BoxShadow(color: Color(0x330A244A), blurRadius: 12)],
                         ),
                         child: Text(
-                          _mapStatusMessage,
+                          '$_pickupEtaMinutes min',
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 13,
-                            height: 1.35,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
-                    ),
-                    const Positioned(
-                      left: 55,
-                      bottom: 70,
-                      child: Icon(
-                        Icons.location_on_rounded,
-                        color: AppColors.orange,
-                        size: 44,
                       ),
                     ),
-                    const Positioned(
-                      right: 62,
-                      top: 280,
-                      child: Icon(
-                        Icons.location_on_rounded,
-                        color: AppColors.blue,
-                        size: 44,
-                      ),
-                    ),
-                    Positioned.fill(
+                    if (!_accepted) Positioned.fill(
                       child: AnimatedBuilder(
                         animation: _searchProgress,
                         builder: (context, _) {
@@ -478,6 +674,8 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                 onCancel: _cancel,
                 onRetry: _retry,
                 onPay: _payNow,
+                onWalletPay: _payWallet,
+                walletAvailable: _booking['walletPaymentAvailable'] != false,
               ),
             ],
           ),
@@ -592,6 +790,8 @@ class _SearchPanel extends StatelessWidget {
     required this.onCancel,
     required this.onRetry,
     required this.onPay,
+    required this.onWalletPay,
+    required this.walletAvailable,
   });
   final String vehicleName;
   final String vehicleImage;
@@ -610,6 +810,8 @@ class _SearchPanel extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onRetry;
   final VoidCallback onPay;
+  final VoidCallback onWalletPay;
+  final bool walletAvailable;
 
   String get title => switch (status) {
     'DRIVER_ACCEPTED' => 'Driver found',
@@ -864,6 +1066,14 @@ class _SearchPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
+        if (status == 'PAYMENT_PENDING') ...[
+          OutlinedButton.icon(
+            onPressed: paying || !walletAvailable ? null : onWalletPay,
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            label: Text(walletAvailable ? 'Pay with Wallet · Save 5%' : 'Checkout / QR already started'),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (status == 'PAYMENT_PENDING' && pricing != null) ...[
           Container(
             padding: const EdgeInsets.all(13),
@@ -896,7 +1106,7 @@ class _SearchPanel extends StatelessWidget {
                     backgroundColor: AppColors.orange,
                   ),
                   child: Text(
-                    paying ? 'Opening Razorpay...' : 'Pay Now  •  ₹$amount',
+                    paying ? 'Processing payment...' : 'Pay Now  •  ₹$amount',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 )

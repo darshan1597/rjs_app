@@ -184,7 +184,7 @@ enquiryRouter.post("/:enquiryId/convert", validate(enquiryActionSchema), async (
             end = new Date(
                 start.getTime() + enquiry.numberOfDays * 24 * 60 * 60 * 1000,
             );
-        const booking = await Booking.create({
+        const booking = await Booking.createWithUniqueNumber({
             customer: enquiry.customer,
             serviceType: "CUSTOM_TRIP",
             timing: "SCHEDULED",

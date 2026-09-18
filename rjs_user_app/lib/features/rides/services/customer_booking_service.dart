@@ -1,14 +1,23 @@
 import '../../../core/network/customer_auth_service.dart';
 
 class CustomerBookingService {
-  static Future<Map<String, dynamic>> vehicleCatalog({required double pickupLatitude, required double pickupLongitude, required double destinationLatitude, required double destinationLongitude}) async {
-    final query = Uri(queryParameters: {
-      'pickupLatitude': '$pickupLatitude',
-      'pickupLongitude': '$pickupLongitude',
-      'destinationLatitude': '$destinationLatitude',
-      'destinationLongitude': '$destinationLongitude',
-    }).query;
-    return CustomerAuthService.authorizedGet('customer/bookings/vehicle-catalog?$query');
+  static Future<Map<String, dynamic>> vehicleCatalog({
+    required double pickupLatitude,
+    required double pickupLongitude,
+    required double destinationLatitude,
+    required double destinationLongitude,
+  }) async {
+    final query = Uri(
+      queryParameters: {
+        'pickupLatitude': '$pickupLatitude',
+        'pickupLongitude': '$pickupLongitude',
+        'destinationLatitude': '$destinationLatitude',
+        'destinationLongitude': '$destinationLongitude',
+      },
+    ).query;
+    return CustomerAuthService.authorizedGet(
+      'customer/bookings/vehicle-catalog?$query',
+    );
   }
 
   static Future<List<Map<String, dynamic>>> list() async {
@@ -27,6 +36,8 @@ class CustomerBookingService {
     required String categoryId,
     required String variantId,
     String? paymentMethod,
+    DateTime? scheduledFor,
+    String? idempotencyKey,
   }) async {
     final data = await CustomerAuthService.authorizedPost('customer/bookings', {
       'pickupAddress': pickupAddress,
@@ -38,6 +49,8 @@ class CustomerBookingService {
       'categoryId': categoryId,
       'variantId': variantId,
       'paymentMethod': ?paymentMethod,
+      'scheduledFor': ?scheduledFor?.toUtc().toIso8601String(),
+      'idempotencyKey': ?idempotencyKey,
     });
     return data['booking'] as Map<String, dynamic>;
   }
@@ -47,6 +60,13 @@ class CustomerBookingService {
       'customer/bookings/$bookingId',
     );
     return data['booking'] as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> getReceipt(String bookingId) async {
+    final data = await CustomerAuthService.authorizedGet(
+      'customer/bookings/$bookingId/receipt',
+    );
+    return data['receipt'] as Map<String, dynamic>;
   }
 
   static Future<Map<String, dynamic>> cancel(String bookingId) async {
@@ -60,16 +80,6 @@ class CustomerBookingService {
   static Future<Map<String, dynamic>> retrySearch(String bookingId) async {
     final data = await CustomerAuthService.authorizedPost(
       'customer/bookings/$bookingId/retry-search',
-      const {},
-    );
-    return data['booking'] as Map<String, dynamic>;
-  }
-
-  static Future<Map<String, dynamic>> confirmTestPayment(
-    String bookingId,
-  ) async {
-    final data = await CustomerAuthService.authorizedPost(
-      'customer/bookings/$bookingId/confirm-test-payment',
       const {},
     );
     return data['booking'] as Map<String, dynamic>;

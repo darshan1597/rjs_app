@@ -1,5 +1,5 @@
 import express from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { createLimiter } from '../../common/middleware/rate-limits.js';
 import { validate } from '../../common/middleware/validate.js';
 import { changePassword, login, logout, logoutAll, me, refresh, setupMfa, verifyMfa, verifyMfaSetup } from './admin-auth.controller.js';
 import { authenticateAdmin } from './admin-auth.middleware.js';
@@ -7,7 +7,7 @@ import { challengeSchema, changePasswordSchema, loginSchema, mfaVerificationSche
 
 const adminAuthRouter = express.Router();
 
-const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 10, standardHeaders: 'draft-8' });
+const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, limit: 10 });
 
 adminAuthRouter.post('/login', loginLimiter, validate(loginSchema), login);
 adminAuthRouter.post('/mfa/setup', loginLimiter, validate(challengeSchema), setupMfa);

@@ -66,6 +66,10 @@ const paymentSchema = new mongoose.Schema(
             index: true,
         },
         paidAt: Date,
+        failedAt: Date,
+        failureCode: { type: String, trim: true },
+        failureReason: { type: String, trim: true },
+        failureDescription: { type: String, trim: true },
     },
     { timestamps: true },
 );
@@ -167,7 +171,23 @@ const refundSchema = new mongoose.Schema(
     },
     { timestamps: true },
 );
+const webhookEventSchema = new mongoose.Schema(
+    {
+        eventId: { type: String, required: true, unique: true, index: true },
+        eventType: { type: String, required: true, trim: true },
+        status: {
+            type: String,
+            enum: ["PROCESSING", "PROCESSED", "IGNORED"],
+            default: "PROCESSING",
+            index: true,
+        },
+        paymentId: { type: String, trim: true },
+        processedAt: Date,
+    },
+    { timestamps: true },
+);
 const Payment = mongoose.model("Payment", paymentSchema);
 const DriverPayout = mongoose.model("DriverPayout", driverPayoutSchema);
 const Refund = mongoose.model("Refund", refundSchema);
-export { DriverPayout, Payment, Refund };
+const RazorpayWebhookEvent = mongoose.model("RazorpayWebhookEvent", webhookEventSchema);
+export { DriverPayout, Payment, RazorpayWebhookEvent, Refund };

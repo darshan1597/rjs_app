@@ -111,10 +111,20 @@ async function computeRoute({ origin, destination }) {
   });
   const route = data.routes?.[0];
   if (!route) throw new AppError(422, 'ROUTE_NOT_FOUND', 'No driving route was found');
-  const seconds = Number.parseFloat(String(route.duration || '0').replace('s', ''));
+  const duration = typeof route.duration === 'string' && /^\d+(?:\.\d+)?s$/.test(route.duration)
+    ? Number(route.duration.slice(0, -1))
+    : NaN;
+  // Only accept an omitted distance for an explicitly zero-duration route.
+  const distanceMeters = route.distanceMeters === undefined && duration === 0
+    ? 0
+    : route.distanceMeters;
+  if (!Number.isFinite(duration) || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
+    throw new AppError(502, 'INVALID_ROUTE_RESPONSE', 'Google Maps returned incomplete route details. Please refresh your pickup route.');
+  }
+  const seconds = duration;
   return {
-    distanceMeters: route.distanceMeters,
-    distanceKm: Math.round((route.distanceMeters / 1000) * 100) / 100,
+    distanceMeters,
+    distanceKm: Math.round((distanceMeters / 1000) * 100) / 100,
     durationSeconds: Math.round(seconds),
     durationMinutes: Math.max(1, Math.ceil(seconds / 60)),
     encodedPolyline: route.polyline?.encodedPolyline || '',

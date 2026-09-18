@@ -2,6 +2,8 @@ import { AppError } from '../../common/errors/app-error.js';
 import { Driver } from '../drivers/driver.model.js';
 import { Booking } from './booking.model.js';
 import { Payment, Refund } from '../payments/payment.model.js';
+import { assignableBookingStatuses, canAssignBooking } from './assignment-policy.js';
+import { scheduledPickupState } from './scheduled-pickup-policy.js';
 
 async function listBookings({ page, limit, search, status, serviceType, paymentStatus }) {
   const filter = {};
@@ -23,16 +25,20 @@ async function listBookings({ page, limit, search, status, serviceType, paymentS
     ]; 
   }
   const [items, total, statuses] = await Promise.all([
-    Booking.find(filter).populate('currentDriverId', 'driverCode personal.fullName personal.phone vehicle').sort({ scheduledStartAt: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Booking.find(filter).populate('currentDriverId', 'driverCode personal.fullName personal.phone vehicle').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Booking.countDocuments(filter), Booking.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
   ]);
-  return { items, summary: Object.fromEntries(statuses.map((row) => [row._id, row.count])), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+  return { items: items.map((booking) => ({ ...booking, pickupOverdue: scheduledPickupState(booking).pickupOverdue })), summary: Object.fromEntries(statuses.map((row) => [row._id, row.count])), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
 }
 
 async function eligibleDrivers(bookingId) {
   const booking = await Booking.findById(bookingId).lean();
 
   if (!booking) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking was not found');
+
+  if (!canAssignBooking(booking.status)) {
+    throw new AppError(409, 'BOOKING_NOT_ASSIGNABLE', 'Driver assignment can only be changed before pickup travel begins');
+  }
 
   const busyIds = await Booking.distinct('currentDriverId', { _id: { $ne: booking._id }, currentDriverId: { $ne: null }, status: { $nin: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] }, scheduledStartAt: { $lt: booking.scheduledEndAt }, scheduledEndAt: { $gt: booking.scheduledStartAt } });
 
@@ -57,7 +63,7 @@ async function assignDriver(bookingId, driverId, employeeId, reason) {
 
   if (!driver) throw new AppError(409, 'DRIVER_NOT_ELIGIBLE', 'This driver is unavailable or does not match the booking');
 
-  const updated = await Booking.findOneAndUpdate({ _id: bookingId, updatedAt: booking.updatedAt }, { $set: { currentDriverId: driverId, status: 'ASSIGNED' }, $push: { assignments: { driverId, vehicleRegistrationNumber: driver.vehicle.registrationNumber, assignedBy: employeeId, reason, method: 'MANUAL' } } }, { new: true, runValidators: true }).populate('currentDriverId', 'driverCode personal.fullName personal.phone vehicle');
+  const updated = await Booking.findOneAndUpdate({ _id: bookingId, updatedAt: booking.updatedAt, status: { $in: assignableBookingStatuses } }, { $set: { currentDriverId: driverId, status: 'ASSIGNED' }, $push: { assignments: { driverId, vehicleRegistrationNumber: driver.vehicle.registrationNumber, assignedBy: employeeId, reason, method: 'MANUAL' }, statusHistory: { status: 'ASSIGNED', changedBy: employeeId, note: reason || 'Driver assigned by admin' } } }, { new: true, runValidators: true }).populate('currentDriverId', 'driverCode personal.fullName personal.phone vehicle');
 
   if (!updated) throw new AppError(409, 'BOOKING_CHANGED', 'The booking changed while assigning. Refresh and try again');
 

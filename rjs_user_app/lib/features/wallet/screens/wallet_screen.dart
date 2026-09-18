@@ -5,15 +5,45 @@ import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 import '../../../shared/widgets/notification_popup.dart';
 
-class WalletScreen extends StatefulWidget {
-  const WalletScreen({super.key});
-
-  @override
-  State<WalletScreen> createState() => _WalletScreenState();
+String _walletMoney(num paise) {
+  final parts = (paise / 100).toStringAsFixed(2).split('.');
+  final whole = parts.first.replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (match) => '${match[1]},');
+  return '₹$whole.${parts.last}';
+}
+String _walletDate(dynamic value) {
+  final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+  if (date == null) return '--';
+  return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}, ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 }
 
-class _WalletScreenState extends State<WalletScreen> {
-  bool _showBalance = true;
+class WalletDesign extends StatelessWidget {
+  const WalletDesign({super.key, required this.wallet, required this.showBalance,
+    required this.loading, required this.paying, required this.error,
+    required this.onToggle, required this.onAddMoney, required this.onRefresh,
+    required this.onCheckPayment});
+  final Map<String, dynamic>? wallet;
+  final bool showBalance, loading, paying;
+  final String? error;
+  final VoidCallback onToggle, onAddMoney;
+  final Future<void> Function() onRefresh;
+  final void Function(Map) onCheckPayment;
+  int get discount => (wallet?['discountPercent'] as num? ?? 5).toInt();
+  List<Map<String, dynamic>> get transactions =>
+    (wallet?['transactions'] as List? ?? []).cast<Map<String, dynamic>>();
+  void _offers(BuildContext context) => showModalBottomSheet<void>(
+    context: context, isScrollControlled: true, showDragHandle: true,
+    builder: (sheetContext) => SafeArea(child: Padding(padding: const EdgeInsets.all(16),
+      child: _OffersPanel(discount: discount, onAddMoney: paying || wallet == null ? null : () {
+        Navigator.pop(sheetContext);
+        onAddMoney();
+      }))),
+  );
+  void _history(BuildContext context) => showModalBottomSheet<void>(
+    context: context, isScrollControlled: true, showDragHandle: true,
+    builder: (_) => SafeArea(child: SizedBox(height: MediaQuery.sizeOf(context).height * .7,
+      child: SingleChildScrollView(padding: const EdgeInsets.all(16),
+        child: _RecentTransactions(transactions: transactions)))),
+  );
 
   @override
   Widget build(BuildContext context) => BookRideScaffold(
@@ -25,8 +55,8 @@ class _WalletScreenState extends State<WalletScreen> {
     body: SafeArea(
       top: false,
       bottom: false,
-      child: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
+      child: RefreshIndicator(onRefresh: onRefresh, child: CustomScrollView(
+        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         slivers: [
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
@@ -38,24 +68,39 @@ class _WalletScreenState extends State<WalletScreen> {
             sliver: SliverList.list(
               children: [
                 _WalletHeader(onMenu: () => showRjsDrawer(context)),
+                if (loading) const LinearProgressIndicator(),
+                if (error != null) Padding(padding: const EdgeInsets.only(top: 10),
+                  child: Row(children: [Expanded(child: Text(error!, style: const TextStyle(color: Colors.red))),
+                    TextButton(onPressed: loading ? null : onRefresh, child: const Text('Retry'))])),
                 const SizedBox(height: 14),
                 _BalanceCard(
-                  showBalance: _showBalance,
-                  onToggle: () => setState(() => _showBalance = !_showBalance),
+                  showBalance: showBalance,
+                  balancePaise: wallet?['balancePaise'] as num?,
+                  onToggle: onToggle,
+                  onAddMoney: paying || wallet == null ? null : onAddMoney,
+                  paying: paying,
                 ),
                 const SizedBox(height: 10),
-                const _QuickActions(),
+                _WalletPromo(discount: discount, onOffers: () => _offers(context)),
+                for (final topup in (wallet?['pendingTopups'] as List? ?? [])) ...[
+                  const SizedBox(height: 10),
+                  _Panel(child: Row(children: [Expanded(child: Text('Pending top-up: ${_walletMoney(topup['amountPaise'] as num)}\nAlready paid? Check without paying again.',
+                    style: const TextStyle(color: AppColors.navy, fontSize: 11))),
+                    TextButton(onPressed: paying ? null : () => onCheckPayment(topup as Map), child: const Text('Check payment'))])),
+                ],
                 const SizedBox(height: 10),
-                const _WalletPromo(),
+                _RecentTransactions(transactions: transactions.take(5).toList(),
+                  loading: wallet == null, onViewAll: () => _history(context)),
                 const SizedBox(height: 10),
-                const _RecentTransactions(),
+                _OffersPanel(discount: discount, onAddMoney: paying || wallet == null ? null : onAddMoney),
                 const SizedBox(height: 10),
-                const _OffersPanel(),
+                const Text('For RJS ride payments only. No withdrawals or transfers.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 10)),
               ],
             ),
           ),
         ],
-      ),
+      )),
     ),
   );
 }
@@ -148,9 +193,13 @@ class _WalletHeaderButton extends StatelessWidget {
 }
 
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.showBalance, required this.onToggle});
+  const _BalanceCard({required this.showBalance, required this.onToggle,
+    required this.balancePaise, required this.onAddMoney, required this.paying});
   final bool showBalance;
   final VoidCallback onToggle;
+  final num? balancePaise;
+  final VoidCallback? onAddMoney;
+  final bool paying;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -187,7 +236,7 @@ class _BalanceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    showBalance ? '₹2,450.00' : '₹ ••••••',
+                    balancePaise == null ? '—' : showBalance ? _walletMoney(balancePaise!) : '₹ ••••••',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 29,
@@ -197,7 +246,7 @@ class _BalanceCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   InkWell(
                     onTap: onToggle,
-                    child: Row(
+                    child: FittedBox(alignment: Alignment.centerLeft, fit: BoxFit.scaleDown, child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text(
@@ -213,7 +262,7 @@ class _BalanceCard extends StatelessWidget {
                           size: 17,
                         ),
                       ],
-                    ),
+                    )),
                   ),
                 ],
               ),
@@ -253,9 +302,9 @@ class _BalanceCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 7),
                 ElevatedButton.icon(
-                  onPressed: () {},
+                  onPressed: onAddMoney,
                   icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Add Money'),
+                  label: Text(paying ? 'Processing…' : 'Add Money'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: AppColors.blue,
@@ -277,266 +326,61 @@ class _BalanceCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 15),
-        Container(height: 1, color: Colors.white24),
-        const SizedBox(height: 13),
-        const Row(
-          children: [
-            Expanded(child: _BalancePart('₹2,000.00', 'Main Balance')),
-            _WhiteDivider(),
-            Expanded(
-              child: _BalancePart('₹450.00', 'Bonus Balance', info: true),
-            ),
-            _WhiteDivider(),
-            Expanded(
-              child: _BalancePart('₹0.00', 'Locked Balance', info: true),
-            ),
-          ],
-        ),
       ],
     ),
   );
 }
 
-class _BalancePart extends StatelessWidget {
-  const _BalancePart(this.amount, this.label, {this.info = false});
-  final String amount;
-  final String label;
-  final bool info;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 7),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          amount,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                style: const TextStyle(color: Colors.white, fontSize: 9.5),
-              ),
-            ),
-            if (info) ...[
-              const SizedBox(width: 4),
-              const Icon(
-                Icons.info_outline_rounded,
-                color: Colors.white,
-                size: 11,
-              ),
-            ],
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-class _WhiteDivider extends StatelessWidget {
-  const _WhiteDivider();
-  @override
-  Widget build(BuildContext context) =>
-      Container(width: 1, height: 32, color: Colors.white24);
-}
-
-class _QuickActions extends StatelessWidget {
-  const _QuickActions();
-  static const actions = [
-    (
-      Icons.currency_rupee_rounded,
-      'Add Money',
-      'Top up wallet',
-      AppColors.blue,
-    ),
-    (
-      Icons.swap_horiz_rounded,
-      'Send Money',
-      'Transfer to others',
-      Color(0xFF8B3DE0),
-    ),
-    (
-      Icons.receipt_long_outlined,
-      'Transaction',
-      'View history',
-      Color(0xFFFF9A00),
-    ),
-    (Icons.local_offer_outlined, 'Offers', 'View all offers', AppColors.orange),
-  ];
-  @override
-  Widget build(BuildContext context) => Row(
-    children: List.generate(
-      actions.length,
-      (i) => Expanded(
-        child: Padding(
-          padding: EdgeInsets.only(right: i == actions.length - 1 ? 0 : 6),
-          child: Container(
-            height: 94,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0C102040),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: actions[i].$4.withValues(alpha: .09),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(actions[i].$1, color: actions[i].$4, size: 22),
-                ),
-                const SizedBox(height: 6),
-                FittedBox(
-                  child: Text(
-                    actions[i].$2,
-                    style: const TextStyle(
-                      color: AppColors.navy,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                FittedBox(
-                  child: Text(
-                    actions[i].$3,
-                    style: const TextStyle(
-                      color: AppColors.muted,
-                      fontSize: 8.5,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
-}
 
 class _WalletPromo extends StatelessWidget {
-  const _WalletPromo();
+  const _WalletPromo({required this.discount, required this.onOffers});
+  final int discount;
+  final VoidCallback onOffers;
   @override
-  Widget build(BuildContext context) => Container(
-    height: 94,
-    padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF2F7FF),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Row(
-      children: [
-        Image.asset(
-          'assets/images/wallet-promo-transparent.png',
-          width: 88,
-          height: 76,
-          fit: BoxFit.contain,
-        ),
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 430;
+    final button = OutlinedButton.icon(
+      onPressed: onOffers,
+      icon: const Icon(Icons.sell_outlined, size: 15),
+      label: const Text('View Offers'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.blue,
+        side: const BorderSide(color: AppColors.blue),
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        textStyle: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700),
+      ),
+    );
+    return Container(
+      constraints: const BoxConstraints(minHeight: 94),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 0),
+      decoration: BoxDecoration(color: const Color(0xFFF2F7FF), borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Image.asset('assets/images/wallet-promo-transparent.png', width: 88, height: 76, fit: BoxFit.contain),
         const SizedBox(width: 10),
-        const Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Use Wallet for faster bookings',
-                style: TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              SizedBox(height: 5),
-              Text(
-                'Get exclusive offers and cashback\non every booking',
-                style: TextStyle(
-                  color: AppColors.muted,
-                  fontSize: 10,
-                  height: 1.45,
-                ),
-              ),
-            ],
-          ),
-        ),
-        OutlinedButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.sell_outlined, size: 15),
-          label: const Text('View Offers'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.blue,
-            side: const BorderSide(color: AppColors.blue),
-            padding: const EdgeInsets.symmetric(horizontal: 9),
-            textStyle: const TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
+        Expanded(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Use Wallet for faster payments',
+              style: TextStyle(color: AppColors.navy, fontSize: 12, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 5),
+            Text('Save $discount% when you pay\nfor a ride with your wallet',
+              style: const TextStyle(color: AppColors.muted, fontSize: 10, height: 1.45)),
+            if (compact) button,
+          ],
+        )),
+        if (!compact) button,
+      ]),
+    );
+  }
 }
 
 class _RecentTransactions extends StatelessWidget {
-  const _RecentTransactions();
-  static const transactions = [
-    (
-      'Added to Wallet',
-      'Via UPI',
-      '+ ₹2,000.00',
-      '24 May 2026, 10:30 AM',
-      true,
-    ),
-    (
-      'Bangalore City Tour',
-      'Booking ID: #RJS12345',
-      '- ₹2,499.00',
-      '24 May 2026, 09:15 AM',
-      false,
-    ),
-    (
-      'Cashback Received',
-      'Bangalore City Tour',
-      '+ ₹249.90',
-      '24 May 2026, 09:20 AM',
-      true,
-    ),
-    (
-      'Mysore One Day Trip',
-      'Booking ID: #RJS12340',
-      '- ₹4,499.00',
-      '20 May 2026, 11:45 AM',
-      false,
-    ),
-    (
-      'Added to Wallet',
-      'Via Debit Card',
-      '+ ₹3,000.00',
-      '18 May 2026, 08:10 PM',
-      true,
-    ),
-  ];
+  const _RecentTransactions({required this.transactions, this.loading = false, this.onViewAll});
+  final List<Map<String, dynamic>> transactions;
+  final bool loading;
+  final VoidCallback? onViewAll;
   @override
   Widget build(BuildContext context) => _Panel(
     padding: const EdgeInsets.fromLTRB(10, 11, 10, 5),
@@ -546,8 +390,8 @@ class _RecentTransactions extends StatelessWidget {
         Row(
           children: [
             const Expanded(child: _Title('Recent Transactions')),
-            TextButton(
-              onPressed: () {},
+            if (onViewAll != null) TextButton(
+              onPressed: onViewAll,
               child: const Row(
                 children: [
                   Text('View All', style: TextStyle(fontSize: 10)),
@@ -564,8 +408,20 @@ class _RecentTransactions extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
-            children: List.generate(transactions.length, (i) {
-              final item = transactions[i];
+            children: [
+              if (transactions.isEmpty) Padding(padding: const EdgeInsets.all(20),
+                child: Text(loading ? 'Loading transactions…' : 'No transactions yet.',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 11))),
+              ...List.generate(transactions.length, (i) {
+              final entry = transactions[i];
+              final credit = entry['type'] == 'TOPUP';
+              final saved = entry['discountPaise'] as num? ?? 0;
+              final item = (
+                credit ? 'Added to Wallet' : entry['description']?.toString() ?? 'Ride payment',
+                credit ? 'Via Razorpay' : saved > 0 ? 'Saved ${_walletMoney(saved)} · Wallet discount' : 'Paid with RJS Wallet',
+                '${credit ? '+' : '-'} ${_walletMoney(entry['amountPaise'] as num? ?? 0)}',
+                _walletDate(entry['createdAt']), credit,
+              );
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
                 decoration: BoxDecoration(
@@ -647,6 +503,7 @@ class _RecentTransactions extends StatelessWidget {
                 ),
               );
             }),
+            ],
           ),
         ),
       ],
@@ -655,89 +512,61 @@ class _RecentTransactions extends StatelessWidget {
 }
 
 class _OffersPanel extends StatelessWidget {
-  const _OffersPanel();
+  const _OffersPanel({required this.discount, required this.onAddMoney});
+  final int discount;
+  final VoidCallback? onAddMoney;
   @override
-  Widget build(BuildContext context) => _Panel(
-    child: Column(
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 430;
+    final button = OutlinedButton(
+      onPressed: onAddMoney,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFFF8A00),
+        side: const BorderSide(color: Color(0xFFFF9A00)),
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        textStyle: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700),
+      ),
+      child: const Text('Add Money Now'),
+    );
+    return _Panel(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _Title('Offers & Benefits'),
         const SizedBox(height: 9),
         Container(
-          height: 78,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          constraints: const BoxConstraints(minHeight: 78),
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: compact ? 8 : 0),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFFFF4DA), Color(0xFFFFFAEC)],
-            ),
+            gradient: const LinearGradient(colors: [Color(0xFFFFF4DA), Color(0xFFFFFAEC)]),
             borderRadius: BorderRadius.circular(9),
           ),
-          child: Row(
-            children: [
-              Image.asset(
-                'assets/images/wallet-offer-gift-transparent.png',
-                width: 90,
-                height: 72,
-                fit: BoxFit.contain,
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Get up to ₹250 Cashback',
-                      style: TextStyle(
-                        color: Color(0xFF3A210C),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'Add money to wallet and get instant\ncashback on your next booking',
-                      style: TextStyle(
-                        color: Color(0xFF5E402A),
-                        fontSize: 9,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFFF8A00),
-                  side: const BorderSide(color: Color(0xFFFF9A00)),
-                  padding: const EdgeInsets.symmetric(horizontal: 9),
-                  textStyle: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                child: const Text('Add Money Now'),
-              ),
-            ],
-          ),
+          child: Row(children: [
+            Image.asset('assets/images/wallet-offer-gift-transparent.png', width: 90, height: 72, fit: BoxFit.contain),
+            const SizedBox(width: 8),
+            Expanded(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Save $discount% with Wallet',
+                  style: const TextStyle(color: Color(0xFF3A210C), fontSize: 12, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 3),
+                Text('Pay for your completed ride with\nwallet and get $discount% off the final bill',
+                  style: const TextStyle(color: Color(0xFF5E402A), fontSize: 9, height: 1.35)),
+                if (compact) button,
+              ],
+            )),
+            if (!compact) button,
+          ]),
         ),
         const SizedBox(height: 8),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _Dot(true),
-            SizedBox(width: 6),
-            _Dot(false),
-            SizedBox(width: 6),
-            _Dot(false),
-            SizedBox(width: 6),
-            _Dot(false),
-          ],
-        ),
+        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          _Dot(true), SizedBox(width: 6), _Dot(false), SizedBox(width: 6),
+          _Dot(false), SizedBox(width: 6), _Dot(false),
+        ]),
       ],
-    ),
-  );
+    ));
+  }
 }
 
 class _Dot extends StatelessWidget {

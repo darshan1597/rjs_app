@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { createLimiter } from './common/middleware/rate-limits.js';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { errorHandler, notFoundHandler } from './common/middleware/error-handler.js';
@@ -27,11 +27,19 @@ import { driverAuthRouter } from './modules/drivers/driver-auth.routes.js';
 import { driverTripRouter } from './modules/drivers/driver-trip.routes.js';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes.js';
 import { customerMapRouter } from './modules/maps/customer-map.routes.js';
+import { createRequestMonitoring } from './common/middleware/request-monitoring.js';
+import { authenticateAdmin } from './modules/admins/admin-auth.middleware.js';
+import { AppError } from './common/errors/app-error.js';
+import { customerWalletRouter } from './modules/wallets/wallet.routes.js';
 
 function createApp() {
   const app = express();
+  const monitoring = createRequestMonitoring();
+  app.use(monitoring.middleware);
 
   app.disable('x-powered-by');
+  // Explicit proxy IPs/subnets only; never blindly trust all forwarded headers.
+  if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY.split(',').map((value) => value.trim()));
   app.use(pinoHttp({
     redact: {
       paths: ['req.headers.authorization', 'req.headers.cookie'],
@@ -46,12 +54,17 @@ function createApp() {
     },
     credentials: true,
   }));
-  app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8' }));
   app.use('/api/v1/payments/razorpay/webhook', razorpayWebhookRouter);
+  // Coarse per-IP abuse guard, not a shared server-wide request quota.
+  app.use(createLimiter({ windowMs: 60000, limit: 6000 }));
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
 
   app.use('/api/v1/health', healthRouter);
+  app.get('/api/v1/admin/monitoring', authenticateAdmin, (req, res, next) => {
+    if (req.admin.accountType !== 'SUPER_ADMIN') return next(new AppError(403, 'FORBIDDEN', 'Only super admins can view monitoring'));
+    return res.json({ success: true, data: monitoring.snapshot() });
+  });
   app.use('/api/v1/admin/auth', adminAuthRouter);
   app.use('/api/v1/admin/employees', employeeRouter);
   app.use('/api/v1/admin/audit-logs', auditRouter);
@@ -72,6 +85,7 @@ function createApp() {
   app.use('/api/v1/customer/auth', customerAuthRouter);
   app.use('/api/v1/customer/addresses', customerAddressRouter);
   app.use('/api/v1/customer/bookings', customerBookingRouter);
+  app.use('/api/v1/customer/wallet', customerWalletRouter);
   app.use('/api/v1/customer/maps', customerMapRouter);
   app.use('/api/v1/driver/auth', driverAuthRouter);
   app.use('/api/v1/driver/trips', driverTripRouter);

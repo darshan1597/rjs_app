@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { generateBookingNumber, isBookingNumberCollision } from './booking-number.js';
 
 const assignmentSchema = new mongoose.Schema({
   driverId: { 
@@ -167,6 +168,9 @@ const bookingSchema = new mongoose.Schema({
     default: 0 
   },
   pricingSnapshot: pricingSnapshotSchema,
+  paymentChannel: { type: String, enum: ['RAZORPAY', 'WALLET'] },
+  walletDiscountAmount: { type: Number, min: 0 },
+  walletPaidAmount: { type: Number, min: 0 },
   currentDriverId: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Driver', 
@@ -238,11 +242,21 @@ const bookingSchema = new mongoose.Schema({
     index: true 
   },
   razorpayQrImageUrl: String,
+  bookingRequestKey: String,
+  bookingRequestHash: String,
+  pickupPreparation: {
+    driverId: String,
+    checkedAt: Date,
+    origin: { latitude: Number, longitude: Number },
+    route: { distanceMeters: Number, distanceKm: Number, durationSeconds: Number, durationMinutes: Number, encodedPolyline: String },
+  },
 }, { timestamps: true });
+
+bookingSchema.index({ customerId: 1, bookingRequestKey: 1 }, { unique: true, partialFilterExpression: { bookingRequestKey: { $type: 'string' } } });
 
 bookingSchema.pre('validate', async function prepareBooking() {
   if (!this.bookingNumber) 
-    this.bookingNumber = `RJS${Date.now().toString().slice(-8)}`;
+    this.bookingNumber = generateBookingNumber();
 
   const automatic = this.timing === 'IMMEDIATE' && ['IMMEDIATE_RIDE', 'CITY_ROUND_TRIP'].includes(this.serviceType);
 
@@ -253,6 +267,18 @@ bookingSchema.pre('validate', async function prepareBooking() {
   
   if (this.paymentStatus === 'PAID' && !this.currentDriverId && ['NEW', 'PAYMENT_CONFIRMED'].includes(this.status)) this.status = 'ASSIGNMENT_PENDING';
 });
+
+bookingSchema.statics.createWithUniqueNumber = async function createWithUniqueNumber(values) {
+  const maximumAttempts = 5;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      return await this.create({ ...values, bookingNumber: generateBookingNumber() });
+    } catch (error) {
+      if (!isBookingNumberCollision(error) || attempt === maximumAttempts) throw error;
+    }
+  }
+  throw new Error('Unable to generate a unique booking number');
+};
 
 const Booking = mongoose.model('Booking', bookingSchema);
 export { Booking };

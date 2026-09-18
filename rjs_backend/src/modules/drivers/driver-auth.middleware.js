@@ -1,4 +1,5 @@
 import { AppError } from '../../common/errors/app-error.js';
+import { driverLimiter } from '../../common/middleware/rate-limits.js';
 import { verifyDriverAccessToken } from '../../common/security/tokens.js';
 import { DriverSession } from './driver-auth.model.js';
 import { Driver } from './driver.model.js';
@@ -29,7 +30,7 @@ async function authenticateDriver(req, res, next) {
     req.driver = driver;
     req.driverSessionId = session.id;
     
-    return next();
+    return driverLimiter(req, res, next);
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(new AppError(401, 'INVALID_TOKEN', 'The driver access token is invalid or expired'));

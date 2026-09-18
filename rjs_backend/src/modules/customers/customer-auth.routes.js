@@ -13,8 +13,11 @@ import {
 } from "../../common/security/tokens.js";
 import { Customer, CustomerOtp, CustomerSession } from "./customer.model.js";
 import { authenticateCustomer } from "./customer-auth.middleware.js";
+import { createOtpLimiters } from '../../common/middleware/rate-limits.js';
 
 const router = express.Router();
+const otpLimits = createOtpLimiters();
+router.post(['/request-otp', '/verify-otp'], otpLimits.ip);
 const empty = z.object({});
 const phone = z.string().trim().regex(/^\d{10}$/);
 const requestSchema = z.object({
@@ -78,7 +81,7 @@ async function createSession(customer, req) {
         },
     };
 }
-router.post("/request-otp", validate(requestSchema), async (req, res, next) => {
+router.post("/request-otp", validate(requestSchema), otpLimits.request, async (req, res, next) => {
     try {
         const normalized = `+91${req.validated.body.phone}`;
         await CustomerOtp.updateMany(
@@ -101,7 +104,7 @@ router.post("/request-otp", validate(requestSchema), async (req, res, next) => {
         return next(e);
     }
 });
-router.post("/verify-otp", validate(verifySchema), async (req, res, next) => {
+router.post("/verify-otp", validate(verifySchema), otpLimits.verify, async (req, res, next) => {
     try {
         const normalized = `+91${req.validated.body.phone}`;
         const challenge = await CustomerOtp.findOne({

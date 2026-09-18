@@ -34,6 +34,14 @@ const driverSchema = new mongoose.Schema({
     default: 'OFFLINE', 
     index: true 
   },
+  currentLocation: {
+    latitude: { type: Number, min: -90, max: 90 },
+    longitude: { type: Number, min: -180, max: 180 },
+    accuracyMetres: { type: Number, min: 0 },
+    heading: { type: Number, min: 0, max: 360 },
+    speedMetresPerSecond: { type: Number, min: 0 },
+    recordedAt: Date,
+  },
   serviceAssignment: { 
     type: String, 
     enum: ['LOCAL', 'OUTSTATION', 'FLEXIBLE'], 
@@ -227,6 +235,7 @@ driverSchema.methods.toSafeObject = function toSafeObject() {
     status: this.status, 
     operationalStatus: this.operationalStatus,
     serviceAssignment: this.serviceAssignment,
+    currentLocation: this.currentLocation,
     personal: this.personal, 
     licence: this.licence, 
     vehicle: this.vehicle,

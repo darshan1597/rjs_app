@@ -7,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../core/config/google_maps_config.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/network/customer_auth_service.dart';
+import '../../../shared/widgets/scheduled_time_picker.dart';
 import '../../location/screens/location_search_screen.dart';
 import '../../location/models/map_place.dart';
 import '../services/customer_booking_service.dart';
@@ -17,10 +18,12 @@ class ChooseRideScreen extends StatefulWidget {
     super.key,
     required this.pickup,
     required this.destination,
+    this.scheduledFor,
   });
 
   final MapPlace pickup;
   final MapPlace destination;
+  final DateTime? scheduledFor;
 
   @override
   State<ChooseRideScreen> createState() => _ChooseRideScreenState();
@@ -31,6 +34,8 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
   late MapPlace _destination;
   int _selectedRide = 0;
   bool _searching = false;
+  String? _bookingRetryKey;
+  String? _bookingFingerprint;
   DateTime? _scheduledFor;
 
   List<_Ride> _rides = const [];
@@ -45,6 +50,7 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
     super.initState();
     _pickup = widget.pickup;
     _destination = widget.destination;
+    _scheduledFor = widget.scheduledFor;
     _loadRides();
   }
 
@@ -168,10 +174,32 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
   }
 
   Future<void> _searchVehicle() async {
-    if (_rides.isEmpty || !_rides[_selectedRide].available) return;
+    if (_searching) return;
+    if (_rides.isEmpty ||
+        (_scheduledFor == null && !_rides[_selectedRide].available))
+      return;
     setState(() => _searching = true);
     try {
       final ride = _rides[_selectedRide];
+      final fingerprint = [
+        _pickup.address,
+        _pickup.latitude,
+        _pickup.longitude,
+        _destination.address,
+        _destination.latitude,
+        _destination.longitude,
+        ride.categoryId,
+        ride.variantId,
+        _scheduledFor?.toUtc().toIso8601String(),
+      ].join('|');
+      if (_bookingFingerprint != fingerprint) {
+        _bookingFingerprint = fingerprint;
+        final random = math.Random.secure();
+        _bookingRetryKey = List.generate(
+          24,
+          (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+        ).join();
+      }
       final booking = await CustomerBookingService.create(
         pickupAddress: _pickup.address,
         destinationAddress: _destination.address,
@@ -181,19 +209,37 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
         destinationLongitude: _destination.longitude,
         categoryId: ride.categoryId,
         variantId: ride.variantId,
+        scheduledFor: _scheduledFor,
+        idempotencyKey: _bookingRetryKey,
       );
       if (!mounted) return;
-      await Navigator.pushReplacement<void, void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DriverSearchScreen(
-            booking: booking,
-            vehicleName: ride.name,
-            vehicleImage: ride.image,
-            seats: ride.seats,
+      if (_scheduledFor != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Ride ${booking['bookingNumber']} scheduled successfully',
+            ),
+            behavior: SnackBarBehavior.floating,
           ),
-        ),
-      );
+        );
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/bookings',
+          (route) => route.settings.name == '/home',
+        );
+      } else {
+        await Navigator.pushReplacement<void, void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DriverSearchScreen(
+              booking: booking,
+              vehicleName: ride.name,
+              vehicleImage: ride.image,
+              seats: ride.seats,
+            ),
+          ),
+        );
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -247,7 +293,10 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
                         _RideCard(
                           ride: _rides[rideIndex],
                           selected: _selectedRide == rideIndex,
-                          onTap: _rides[rideIndex].available
+                          scheduled: _scheduledFor != null,
+                          onTap:
+                              _rides[rideIndex].available ||
+                                  _scheduledFor != null
                               ? () => setState(() => _selectedRide = rideIndex)
                               : () {},
                         ),
@@ -310,14 +359,14 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
                     markerId: const MarkerId('pickup'),
                     position: pickup,
                     icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueOrange,
+                      BitmapDescriptor.hueAzure,
                     ),
                   ),
                   Marker(
                     markerId: const MarkerId('destination'),
                     position: destination,
                     icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueAzure,
+                      BitmapDescriptor.hueOrange,
                     ),
                   ),
                   if (_routeCalloutIcon != null && points.isNotEmpty)
@@ -648,10 +697,12 @@ class _RideCard extends StatelessWidget {
   const _RideCard({
     required this.ride,
     required this.selected,
+    required this.scheduled,
     required this.onTap,
   });
   final _Ride ride;
   final bool selected;
+  final bool scheduled;
   final VoidCallback onTap;
 
   @override
@@ -659,7 +710,7 @@ class _RideCard extends StatelessWidget {
     onTap: onTap,
     borderRadius: BorderRadius.circular(17),
     child: Opacity(
-      opacity: ride.available ? 1 : .48,
+      opacity: ride.available || scheduled ? 1 : .48,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         height: 94,
@@ -734,7 +785,9 @@ class _RideCard extends StatelessWidget {
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
-                          ride.detail,
+                          scheduled && !ride.available
+                              ? 'Assignment before pickup'
+                              : ride.detail,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: AppColors.muted,
@@ -904,8 +957,12 @@ class _BottomAction extends StatelessWidget {
                       fit: BoxFit.scaleDown,
                       child: Text(
                         searching
-                            ? 'Starting Search...'
-                            : 'Search ${ride.name}',
+                            ? (scheduledFor == null
+                                  ? 'Starting Search...'
+                                  : 'Scheduling...')
+                            : (scheduledFor == null
+                                  ? 'Search ${ride.name}'
+                                  : 'Schedule ${ride.name}'),
                         style: const TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
@@ -983,8 +1040,7 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
   void initState() {
     super.initState();
     final initial =
-        widget.initialValue ??
-        DateTime.now().add(const Duration(minutes: 30));
+        widget.initialValue ?? DateTime.now().add(const Duration(minutes: 35));
     _date = DateTime(initial.year, initial.month, initial.day);
     _time = TimeOfDay.fromDateTime(initial);
   }
@@ -1033,7 +1089,19 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
             DateTime.now().day,
           ),
           lastDate: DateTime.now().add(const Duration(days: 90)),
-          onDateChanged: (value) => setState(() => _date = value),
+          onDateChanged: (value) => setState(() {
+            final candidate = DateTime(
+              value.year,
+              value.month,
+              value.day,
+              _time.hour,
+              _time.minute,
+            );
+            final minimum = DateTime.now().add(const Duration(minutes: 35));
+            final valid = candidate.isBefore(minimum) ? minimum : candidate;
+            _date = DateTime(valid.year, valid.month, valid.day);
+            _time = TimeOfDay.fromDateTime(valid);
+          }),
         ),
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1043,12 +1111,16 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
           ),
           title: const Text(
             'Pickup time',
-            style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              color: AppColors.navy,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           trailing: TextButton(
             onPressed: () async {
-              final value = await showTimePicker(
+              final value = await showScheduledTimePicker(
                 context: context,
+                date: _date,
                 initialTime: _time,
               );
               if (value != null && mounted) setState(() => _time = value);
@@ -1072,9 +1144,15 @@ class _SchedulePickerSheetState extends State<_SchedulePickerSheet> {
                 _time.hour,
                 _time.minute,
               );
-              if (value.isBefore(DateTime.now())) {
+              if (value.isBefore(
+                DateTime.now().add(const Duration(minutes: 30)),
+              )) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please choose a future time')),
+                  const SnackBar(
+                    content: Text(
+                      'Please choose a time at least 30 minutes from now',
+                    ),
+                  ),
                 );
                 return;
               }

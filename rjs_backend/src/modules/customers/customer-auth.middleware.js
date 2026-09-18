@@ -1,4 +1,5 @@
 import { AppError } from '../../common/errors/app-error.js';
+import { customerLimiter } from '../../common/middleware/rate-limits.js';
 import { verifyCustomerAccessToken } from '../../common/security/tokens.js';
 import { Customer, CustomerSession } from './customer.model.js';
 
@@ -25,7 +26,7 @@ async function authenticateCustomer(req, res, next) {
 
     req.customer = customer;
     req.customerSessionId = session.id;
-    return next();
+    return customerLimiter(req, res, next);
   } catch (error) {
     if (error instanceof AppError) return next(error);
     return next(new AppError(401, 'INVALID_TOKEN', 'The access token is invalid or expired'));

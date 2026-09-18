@@ -333,6 +333,14 @@ export default function PaymentsPage() {
                                                     >
                                                         {item.status.replaceAll("_", " ")}
                                                     </span>
+                                                    {item.status === "FAILED" && (
+                                                        <small
+                                                            className="mt-1 block max-w-48 text-red-500"
+                                                            title={item.failureDescription || item.failureReason || "Payment failed"}
+                                                        >
+                                                            {item.failureDescription || item.failureReason || item.failureCode || "Payment failed"}
+                                                        </small>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ) : tab === "payouts" ? (

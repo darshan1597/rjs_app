@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/network/driver_api_service.dart';
+import '../../../core/location/driver_location_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
 import '../../earnings/screens/earnings_screen.dart';
 import '../../profile/screens/driver_profile_screen.dart';
 import '../../trips/screens/scheduled_rides_screen.dart';
+import '../../trips/screens/pickup_preview_screen.dart';
 import '../widgets/active_trip_card.dart';
 import '../widgets/driver_dashboard_sections.dart';
 import '../widgets/driver_home_header.dart';
@@ -41,19 +43,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Future<void> _startOnlineMode() async {
+    _offerTimer?.cancel();
+    _offerTimer = Timer.periodic(
+      const Duration(seconds: 4),
+      (_) => _pollOffers(),
+    );
     try {
-      await DriverApiService.setOnline(true);
-      _offerTimer?.cancel();
-      _offerTimer = Timer.periodic(
-        const Duration(seconds: 4),
-        (_) => _pollOffers(),
-      );
-      await _pollOffers();
+      final data = await DriverApiService.get('driver/auth/me');
+      if (!mounted) return;
+      final driver = data['driver'] as Map<String, dynamic>;
+      setState(() {
+        _driver = driver;
+        _isOnline = driver['operationalStatus'] != 'OFFLINE';
+      });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _isOnline = false);
       _showError(error);
     }
+    await _pollOffers();
   }
 
   @override
@@ -73,15 +80,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final next = !_isOnline;
     setState(() => _changingStatus = true);
     try {
+      final activeTrip = await DriverApiService.activeTrip();
+      if (!mounted) return;
+      if (activeTrip != null) {
+        setState(() { _activeTrip = activeTrip; _isOnline = true; });
+        await DriverLocationService.ensureRunning(activeTrip);
+        _showError('You have an active ride. Continue it from the card above.');
+        return;
+      }
       await DriverApiService.setOnline(next);
       if (!mounted) return;
       setState(() => _isOnline = next);
-      _offerTimer?.cancel();
       if (next) {
-        _offerTimer = Timer.periodic(
-          const Duration(seconds: 4),
-          (_) => _pollOffers(),
-        );
         await _pollOffers();
       }
     } catch (error) {
@@ -92,12 +102,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Future<void> _pollOffers() async {
-    if (!_isOnline || _offerOpen || !mounted) return;
+    if (_offerOpen || !mounted) return;
     try {
       final activeTrip = await DriverApiService.activeTrip();
       if (!mounted) return;
       setState(() => _activeTrip = activeTrip);
-      if (activeTrip != null) return;
+      if (activeTrip != null) {
+        setState(() => _isOnline = true);
+        await DriverLocationService.ensureRunning(activeTrip);
+        return;
+      }
+      await DriverLocationService.stop();
+      if (!_isOnline) return;
       final offers = await DriverApiService.offers();
       if (!mounted || offers.isEmpty || _offerOpen || !_isOnline) return;
       await _showOffer(offers.first);
@@ -127,9 +143,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           },
           onAccept: () async {
             try {
+              await DriverLocationService.prepareForAcceptedRide();
               await DriverApiService.accept(bookingId);
               if (sheetContext.mounted) Navigator.pop(sheetContext);
               if (mounted) {
+                final activeTrip = await DriverApiService.activeTrip();
+                await DriverLocationService.ensureRunning(activeTrip);
                 await _pollOffers();
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -186,11 +205,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     },
   );
 
-  Future<void> _advanceTrip() async {
+  Future<void> _advanceTrip({bool arrive = false}) async {
     final trip = _activeTrip;
     if (trip == null || _tripBusy) return;
     final id = trip['id'].toString();
     final status = trip['status'].toString();
+    if (arrive && status != 'DRIVER_EN_ROUTE') return;
+    if (!arrive && {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(status)) {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => PickupPreviewScreen(trip: trip)),
+      );
+      if (mounted) await _pollOffers();
+      return;
+    }
     String? otp;
     if (status == 'ARRIVED') {
       otp = await _askForOtp();
@@ -204,6 +231,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     setState(() => _tripBusy = true);
     try {
       final updated = switch (status) {
+        'ASSIGNED' => await DriverApiService.markEnRoute(id),
         'DRIVER_ACCEPTED' => await DriverApiService.markEnRoute(id),
         'DRIVER_EN_ROUTE' => await DriverApiService.markArrived(id),
         'ARRIVED' => await DriverApiService.startTrip(id, otp!),
@@ -212,6 +240,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           parkingCharge: charges!['parkingCharge']!,
           tollCharge: charges['tollCharge']!,
         ),
+        'PAYMENT_PENDING' => await DriverApiService.paymentQr(id),
         _ => await DriverApiService.activeTrip(),
       };
       if (mounted) setState(() => _activeTrip = updated);
@@ -308,6 +337,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   trip: _activeTrip!,
                   busy: _tripBusy,
                   onAction: _advanceTrip,
+                  onArrived: () => _advanceTrip(arrive: true),
                 ),
                 const SizedBox(height: 11),
               ],

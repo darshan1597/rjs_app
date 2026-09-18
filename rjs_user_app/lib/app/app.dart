@@ -7,7 +7,7 @@ import '../features/support/screens/help_support_screen.dart';
 import '../features/bookings/screens/bookings_screen.dart';
 import '../features/about/screens/about_rjs_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
-import '../features/wallet/screens/wallet_screen.dart';
+import '../features/wallet/screens/live_wallet_screen.dart';
 import '../features/saved_places/screens/saved_places_screen.dart';
 
 class RjsApp extends StatelessWidget {
