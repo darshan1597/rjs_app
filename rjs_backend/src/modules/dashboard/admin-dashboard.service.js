@@ -2,52 +2,64 @@ import mongoose from "mongoose";
 import { AdminAccount } from "../admins/admin-account.model.js";
 import { AuditLog } from "../audit/audit-log.model.js";
 
+const INDIA_OFFSET_MS = 330 * 60 * 1000;
 const monthStart = (offset) => {
-  const date = new Date();
-  date.setDate(1);
-  date.setHours(0, 0, 0, 0);
-  date.setMonth(date.getMonth() + offset);
-  return date;
+  const indiaNow = new Date(Date.now() + INDIA_OFFSET_MS);
+  return new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth() + offset, 1) - INDIA_OFFSET_MS);
 };
 
 async function revenueSummary() {
   const payments = mongoose.connection.db.collection("payments");
+  const refunds = mongoose.connection.db.collection("refunds");
   const start = monthStart(-6);
-  const [totalResult, monthlyResult] = await Promise.all([
+  const [totalResult, monthlyResult, refundTotalResult, monthlyRefundResult] = await Promise.all([
     payments.aggregate([
-        { $match: { status: { $in: ["COMPLETED", "SUCCESS", "CAPTURED"] } } },
+        { $match: { status: { $in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ["$amount", 0] } } } },
       ]).toArray(),
     payments.aggregate([
         {
           $match: {
-            status: { $in: ["COMPLETED", "SUCCESS", "CAPTURED"] },
-            createdAt: { $gte: start },
+            status: { $in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] },
+            paidAt: { $gte: start },
           },
         },
         {
           $group: {
             _id: {
-              year: { $year: "$createdAt" },
-              month: { $month: "$createdAt" },
+              year: { $year: { date: "$paidAt", timezone: "Asia/Kolkata" } },
+              month: { $month: { date: "$paidAt", timezone: "Asia/Kolkata" } },
             },
             total: { $sum: { $ifNull: ["$amount", 0] } },
           },
         },
       ]).toArray(),
+    refunds.aggregate([
+      { $match: { status: "COMPLETED" } },
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$eligibleAmount", 0] } } } },
+    ]).toArray(),
+    refunds.aggregate([
+      { $match: { status: "COMPLETED", completedAt: { $gte: start } } },
+      { $group: { _id: { year: { $year: { date: "$completedAt", timezone: "Asia/Kolkata" } },
+        month: { $month: { date: "$completedAt", timezone: "Asia/Kolkata" } } },
+        total: { $sum: { $ifNull: ["$eligibleAmount", 0] } } } },
+    ]).toArray(),
   ]);
   const monthly = Array.from({ length: 7 }, (_, index) => {
     const date = monthStart(index - 6);
+    const indiaDate = new Date(date.getTime() + INDIA_OFFSET_MS);
     const match = monthlyResult.find((item) =>
-      item._id.year === date.getFullYear() &&
-      item._id.month === date.getMonth() + 1,
+      item._id.year === indiaDate.getUTCFullYear() &&
+      item._id.month === indiaDate.getUTCMonth() + 1,
     );
+    const refundMatch = monthlyRefundResult.find((item) => item._id.year === indiaDate.getUTCFullYear()
+      && item._id.month === indiaDate.getUTCMonth() + 1);
     return {
-      label: date.toLocaleString("en-IN", { month: "short" }),
-      value: match?.total || 0,
+      label: indiaDate.toLocaleString("en-IN", { month: "short", timeZone: "UTC" }),
+      value: (match?.total || 0) - (refundMatch?.total || 0),
     };
   });
-  return { total: totalResult[0]?.total || 0, monthly };
+  return { total: (totalResult[0]?.total || 0) - (refundTotalResult[0]?.total || 0), monthly };
 }
 async function getAdminDashboard() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

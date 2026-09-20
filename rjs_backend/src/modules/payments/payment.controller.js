@@ -1,9 +1,18 @@
 import { writeAuditLog } from "../audit/audit.service.js";
 import {
+    createRefundRequest as createRefundRecord,
     listPayments as listRecords,
     retryPayout as retryRecord,
     reviewRefund as reviewRecord,
 } from "./payment.service.js";
+async function createRefundRequest(req, res, next) {
+    try {
+        const item = await createRefundRecord(req.validated.params.paymentId, req.validated.body, req.admin.id);
+        await writeAuditLog({ req, action: "refund.request", actor: req.admin, targetType: "Refund", targetId: item.id,
+            metadata: { paymentId: req.validated.params.paymentId, amount: item.eligibleAmount, reason: item.reason } });
+        return res.status(201).json({ success: true, data: item });
+    } catch (error) { return next(error); }
+}
 async function listPayments(req, res, next) {
     try {
         return res.json({
@@ -49,4 +58,4 @@ async function reviewRefund(req, res, next) {
         return next(error);
     }
 }
-export { listPayments, retryPayout, reviewRefund };
+export { createRefundRequest, listPayments, retryPayout, reviewRefund };

@@ -72,6 +72,14 @@ function fetchOrderPayments(orderId) {
 function fetchPayment(paymentId) {
   return request(`/payments/${encodeURIComponent(paymentId)}`);
 }
+function createRefund(paymentId, { amount, receipt, notes }) {
+  return request(`/payments/${encodeURIComponent(paymentId)}/refund`, {
+    method: 'POST', body: { amount, speed: 'normal', receipt, notes }, signal: AbortSignal.timeout(12000),
+  });
+}
+function fetchPaymentRefunds(paymentId) {
+  return request(`/payments/${encodeURIComponent(paymentId)}/refunds`, { signal: AbortSignal.timeout(12000) });
+}
 
 function closeQrCode(qrCodeId) {
   return request(`/payments/qr_codes/${encodeURIComponent(qrCodeId)}/close`, {
@@ -97,4 +105,4 @@ function verifyWebhookSignature(rawBody, signature) {
     && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }
 
-export { closeQrCode, createOrder, createQrCode, createWalletOrder, fetchOrderPayments, fetchPayment, verifyCheckoutSignature, verifyWebhookSignature };
+export { closeQrCode, createOrder, createQrCode, createWalletOrder, createRefund, fetchOrderPayments, fetchPayment, fetchPaymentRefunds, verifyCheckoutSignature, verifyWebhookSignature };

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'wallet_screen.dart';
 import '../services/wallet_service.dart';
+import '../widgets/wallet_credit_celebration.dart';
 import '../widgets/wallet_topup_dialog.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -16,6 +17,9 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
   bool _loading = false, _paying = false, _showBalance = true;
   String? _topupId, _retryKey;
   int? _retryAmount;
+  String? _withdrawalRetryKey, _withdrawalRetryVpa;
+  int? _withdrawalRetryAmount;
+  final Set<String> _claimedCelebrations = {};
   late final Razorpay _razorpay;
   @override
   void initState() {
@@ -41,11 +45,27 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
     setState(() { _loading = true; _error = null; });
     try {
       final data = await WalletService.get();
-      if (mounted) setState(() => _wallet = data);
+      if (mounted) {
+        setState(() => _wallet = data);
+        final celebration = data['celebration'];
+        if (celebration is Map) _claimCelebration(Map<String, dynamic>.from(celebration));
+      }
     } catch (error) {
       if (mounted) setState(() => _error = _message(error));
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+  Future<void> _claimCelebration(Map<String, dynamic> event) async {
+    final id = event['_id']?.toString();
+    if (id == null || !_claimedCelebrations.add(id)) return;
+    try {
+      await WalletService.markEventSeen(id);
+      if (!mounted) return;
+      await showDialog<void>(context: context, barrierDismissible: false,
+        builder: (_) => WalletCreditCelebration(event: event));
+    } catch (_) {
+      _claimedCelebrations.remove(id);
     }
   }
   String _message(Object error) => error.toString().replaceFirst('Exception: ', '');
@@ -63,6 +83,65 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
       _retryKey = List.generate(24, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join();
     }
     await _openTopup(amount, _retryKey!);
+  }
+  Future<void> _withdraw() async {
+    if (_paying || _wallet == null) return;
+    final amountController = TextEditingController();
+    final vpaController = TextEditingController();
+    final withdrawable = (_wallet?['withdrawablePaise'] as num? ?? 0).toInt();
+    final request = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Withdraw real-money balance'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Available to withdraw: ₹${(withdrawable / 100).toStringAsFixed(2)}'),
+          const SizedBox(height: 12),
+          TextField(controller: amountController, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ ')),
+          const SizedBox(height: 10),
+          TextField(controller: vpaController, keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(labelText: 'UPI ID', hintText: 'name@bank')),
+          const SizedBox(height: 8),
+          const Text('Wallet credits and promotional amounts cannot be withdrawn.',
+            style: TextStyle(fontSize: 11, color: Colors.black54)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final amountPaise = ((double.tryParse(amountController.text.trim()) ?? 0) * 100).round();
+            final vpa = vpaController.text.trim().toLowerCase();
+            if (amountPaise < 10000 || amountPaise > withdrawable || !RegExp(r'^[a-z0-9._-]{2,256}@[a-z0-9.-]{2,64}$').hasMatch(vpa)) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter at least ₹100, within your available balance, and a valid UPI ID.')));
+              return;
+            }
+            Navigator.pop(dialogContext, {'amountPaise': amountPaise, 'vpa': vpa});
+          }, child: const Text('Request withdrawal')),
+        ],
+      ),
+    );
+    amountController.dispose();
+    vpaController.dispose();
+    if (request == null || !mounted) return;
+    setState(() => _paying = true);
+    try {
+      final amount = request['amountPaise'] as int;
+      final vpa = request['vpa'] as String;
+      if (_withdrawalRetryAmount != amount || _withdrawalRetryVpa != vpa || _withdrawalRetryKey == null) {
+        _withdrawalRetryAmount = amount;
+        _withdrawalRetryVpa = vpa;
+        _withdrawalRetryKey = List.generate(24, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      }
+      await WalletService.withdraw(amount, vpa, _withdrawalRetryKey!);
+      _withdrawalRetryAmount = null;
+      _withdrawalRetryVpa = null;
+      _withdrawalRetryKey = null;
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Withdrawal submitted for review.')));
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = _message(error));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
   }
   Future<void> _openTopup(int amount, String key) async {
     if (_paying) return;
@@ -126,6 +205,6 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
     wallet: _wallet, loading: _loading, paying: _paying, error: _error,
     showBalance: _showBalance,
     onToggle: () => setState(() => _showBalance = !_showBalance),
-    onAddMoney: _addMoney, onRefresh: _load, onCheckPayment: _check,
+    onAddMoney: _addMoney, onWithdraw: _withdraw, onRefresh: _load, onCheckPayment: _check,
   );
 }

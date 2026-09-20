@@ -95,14 +95,15 @@ export default function PaymentsPage() {
             setError(e.message);
         }
     }
-    async function decide(decision) {
+    async function requestRefund() {
         try {
-            await post(`/admin/payments/refunds/${review.item._id}/review`, {
-                decision,
-                note: review.note,
+            await post(`/admin/payments/${review.item._id}/refunds`, {
+                amount: Number(review.amount),
+                reason: review.reason,
+                requestKey: review.requestKey,
             });
             setReview(null);
-            load();
+            switchTab("refunds");
         } catch (e) {
             setError(e.message);
         }
@@ -255,6 +256,7 @@ export default function PaymentsPage() {
                                             "Amount",
                                             "Date",
                                             "Status",
+                                            "Action",
                                         ]
                                         : tab === "payouts"
                                         ? [
@@ -342,6 +344,14 @@ export default function PaymentsPage() {
                                                         </small>
                                                     )}
                                                 </td>
+                                                <td className="px-5 py-4">
+                                                    {["PAID", "PARTIALLY_REFUNDED"].includes(item.status) && (
+                                                        <button onClick={() => setReview({ item, amount: item.amount, reason: "", requestKey: crypto.randomUUID().replaceAll("-", "") })}
+                                                            className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white cursor-pointer">
+                                                            Request refund
+                                                        </button>
+                                                    )}
+                                                </td>
                                             </tr>
                                         ) : tab === "payouts" ? (
                                             <tr key={item._id} className="border-t">
@@ -420,14 +430,7 @@ export default function PaymentsPage() {
                                                     </span>
                                                 </td>
                                                 <td className="px-5 py-4">
-                                                    {item.status === "PENDING" && (
-                                                        <button
-                                                        onClick={() => setReview({ item, note: "" })}
-                                                        className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white"
-                                                        >
-                                                        Review
-                                                        </button>
-                                                    )}
+                                                    {item.status === "PENDING" ? "Awaiting Super Admin" : "—"}
                                                 </td>
                                             </tr>
                                         ),
@@ -463,36 +466,35 @@ export default function PaymentsPage() {
                 {review && (
                     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
                         <div className="w-full max-w-md rounded-2xl bg-white p-6">
-                            <h2 className="text-xl font-black">Review refund</h2>
+                            <h2 className="text-xl font-black">Request refund</h2>
                             <p className="mt-2 text-[10px] text-slate-500">
-                                Eligible refund: {money(review.item.eligibleAmount)}
+                                Original payment: {money(review.item.amount)} · {review.item.customerName}
                             </p>
+                            <p className="mt-2 rounded-lg bg-blue-50 p-2 text-[9px] font-bold text-blue-700">
+                                The approved refund will be credited to the customer&apos;s RJS Wallet.
+                            </p>
+                            <input type="number" min="1" max={review.item.amount} step="0.01" value={review.amount}
+                                onChange={(e) => setReview({ ...review, amount: e.target.value })}
+                                className="mt-4 h-11 w-full rounded-xl border px-3 text-[10px]" placeholder="Refund amount" />
                             <textarea
-                                value={review.note}
-                                onChange={(e) => setReview({ ...review, note: e.target.value })}
+                                value={review.reason}
+                                onChange={(e) => setReview({ ...review, reason: e.target.value })}
                                 className="mt-4 h-24 w-full rounded-xl border p-3 text-[10px]"
-                                placeholder="Required review note"
+                                placeholder="Required refund reason (at least 10 characters)"
                             />
                             <div className="mt-4 flex gap-2">
                                 <button
                                     onClick={() => setReview(null)}
-                                    className="h-10 flex-1 rounded-xl border text-[9px] font-bold"
+                                    className="h-10 flex-1 rounded-xl border text-[9px] font-bold cursor-pointer"
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    disabled={review.note.trim().length < 3}
-                                    onClick={() => decide("REJECTED")}
-                                    className="h-10 flex-1 rounded-xl bg-red-50 text-[9px] font-bold text-red-600 disabled:opacity-40"
+                                    disabled={review.reason.trim().length < 10 || Number(review.amount) <= 0}
+                                    onClick={requestRefund}
+                                    className="h-10 flex-1 rounded-xl bg-emerald-600 text-[9px] font-bold text-white disabled:opacity-40 cursor-pointer"
                                 >
-                                    Reject
-                                </button>
-                                <button
-                                    disabled={review.note.trim().length < 3}
-                                    onClick={() => decide("APPROVED")}
-                                    className="h-10 flex-1 rounded-xl bg-emerald-600 text-[9px] font-bold text-white disabled:opacity-40"
-                                >
-                                    <LuCircleCheck className="inline" /> Approve
+                                    Submit for approval
                                 </button>
                             </div>
                         </div>

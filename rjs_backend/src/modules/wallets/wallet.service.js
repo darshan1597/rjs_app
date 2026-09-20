@@ -4,6 +4,7 @@ import { Wallet, WalletTopup, WalletLedger } from './wallet.model.js';
 import { Booking } from '../bookings/booking.model.js';
 import { Payment } from '../payments/payment.model.js';
 import { Driver } from '../drivers/driver.model.js';
+import { ensureWalletBalances } from './wallet-balance.service.js';
 
 export function walletQuote(amount) {
   const grossPaise = Math.round(amount * 100);
@@ -13,12 +14,7 @@ export function walletQuote(amount) {
 }
 export async function ensureWallet(customerId) {
   await Promise.all([Wallet.init(), WalletTopup.init(), WalletLedger.init()]);
-  try {
-    return await Wallet.findOneAndUpdate({ customerId }, { $setOnInsert: { balancePaise: 0 } }, { upsert: true, new: true });
-  } catch (error) {
-    if (error.code === 11000) return Wallet.findOne({ customerId });
-    throw error;
-  }
+  return ensureWalletBalances(customerId);
 }
 // The transaction is essential: never fall back to non-atomic financial writes.
 export async function creditTopup(payment) {
@@ -34,9 +30,10 @@ export async function creditTopup(payment) {
       { $set: { status: 'CREDITED', paymentId: payment.id }, $unset: { archivedAt: 1, archiveReason: 1 } }, { new: true, session });
     if (!claimed) return;
     const wallet = await Wallet.findOneAndUpdate({ customerId: topup.customerId },
-      { $inc: { balancePaise: topup.amountPaise } }, { new: true, session });
+      { $inc: { balancePaise: topup.amountPaise, withdrawablePaise: topup.amountPaise } }, { new: true, session });
     await WalletLedger.create([{ customerId: topup.customerId, reference: `topup:${topup.id}`,
       type: 'TOPUP', amountPaise: topup.amountPaise, balanceAfterPaise: wallet.balancePaise,
+      withdrawableDeltaPaise: topup.amountPaise,
       description: 'Money added through Razorpay' }], { session });
   });
   return true;
@@ -54,9 +51,15 @@ export async function payRideWithWallet(customerId, bookingId) {
       throw new AppError(409, 'PAYMENT_ALREADY_STARTED', 'Razorpay checkout or payment QR has already been started for this ride. Please complete that payment.');
     }
     const quote = walletQuote(booking.totalAmount);
-    const wallet = await Wallet.findOneAndUpdate({ customerId, balancePaise: { $gte: quote.payablePaise } },
-      { $inc: { balancePaise: -quote.payablePaise } }, { new: true, session });
-    if (!wallet) throw new AppError(409, 'INSUFFICIENT_WALLET_BALANCE', 'Insufficient wallet balance. Add money or choose Razorpay.');
+    const currentWallet = await Wallet.findOne({ customerId, balancePaise: { $gte: quote.payablePaise } }).session(session);
+    if (!currentWallet) throw new AppError(409, 'INSUFFICIENT_WALLET_BALANCE', 'Insufficient wallet balance. Add money or choose Razorpay.');
+    const restrictedPaidPaise = Math.min(currentWallet.restrictedPaise, quote.payablePaise);
+    const withdrawablePaidPaise = quote.payablePaise - restrictedPaidPaise;
+    const wallet = await Wallet.findOneAndUpdate({ _id: currentWallet._id, balancePaise: { $gte: quote.payablePaise },
+      restrictedPaise: { $gte: restrictedPaidPaise }, withdrawablePaise: { $gte: withdrawablePaidPaise } },
+    { $inc: { balancePaise: -quote.payablePaise, restrictedPaise: -restrictedPaidPaise,
+      withdrawablePaise: -withdrawablePaidPaise } }, { new: true, session });
+    if (!wallet) throw new AppError(409, 'WALLET_BALANCE_CHANGED', 'Wallet balance changed. Please try again.');
     booking.paymentChannel = 'WALLET';
     booking.walletDiscountAmount = quote.discountPaise / 100;
     booking.walletPaidAmount = quote.payablePaise / 100;
@@ -67,9 +70,11 @@ export async function payRideWithWallet(customerId, bookingId) {
     await booking.save({ session });
     await WalletLedger.create([{ customerId, reference: `ride:${booking.id}`, type: 'RIDE_PAYMENT',
       amountPaise: quote.payablePaise, discountPaise: quote.discountPaise, balanceAfterPaise: wallet.balancePaise,
+      withdrawableDeltaPaise: -withdrawablePaidPaise, restrictedDeltaPaise: -restrictedPaidPaise,
       description: `Ride ${booking.bookingNumber}` }], { session });
     await Payment.create([{ bookingId: booking._id, transactionId: `wallet_${booking.id}`, method: 'WALLET',
       methodDisplay: 'RJS Wallet', amount: quote.payablePaise / 100, status: 'PAID', paidAt: new Date(),
+      walletWithdrawablePaidPaise: withdrawablePaidPaise, walletRestrictedPaidPaise: restrictedPaidPaise,
       customerName: booking.customer.name, customerPhone: booking.customer.phone, bookingType: booking.serviceType }], { session });
     await Driver.updateOne({ _id: booking.currentDriverId, operationalStatus: 'ON_TRIP' },
       { $set: { operationalStatus: 'ONLINE' } }, { session });

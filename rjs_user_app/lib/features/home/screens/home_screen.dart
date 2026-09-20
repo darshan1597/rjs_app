@@ -7,6 +7,8 @@ import '../../location/screens/full_map_trip_picker_screen.dart';
 import '../../rental/screens/rental_packages_screen.dart';
 import '../../schedule/screens/schedule_ride_screen.dart';
 import '../../tours/screens/tour_packages_screen.dart';
+import '../../wallet/services/wallet_service.dart';
+import '../../wallet/widgets/wallet_credit_celebration.dart';
 import '../widgets/journey_planner.dart';
 import '../widgets/map_booking_header.dart';
 import '../widgets/safety_banner.dart';
@@ -18,11 +20,46 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedNav = 0;
   double _topPullDistance = 0;
   bool _openingFullMap = false;
   bool _fullMapQueued = false;
+  bool _checkingWalletCredit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showPendingWalletCredit());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _showPendingWalletCredit();
+  }
+
+  Future<void> _showPendingWalletCredit() async {
+    if (_checkingWalletCredit) return;
+    _checkingWalletCredit = true;
+    try {
+      final event = await WalletService.claimCreditEvent();
+      if (event != null && mounted) {
+        await showDialog<void>(context: context, barrierDismissible: false,
+          builder: (_) => WalletCreditCelebration(event: event));
+      }
+    } catch (_) {
+      // A wallet notification must never prevent the customer from using the app.
+    } finally {
+      _checkingWalletCredit = false;
+    }
+  }
 
   void _queueFullMap() {
     if (_openingFullMap || _fullMapQueued) return;

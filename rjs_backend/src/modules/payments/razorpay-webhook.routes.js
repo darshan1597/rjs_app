@@ -1,10 +1,11 @@
 import express from 'express';
 
 import { Booking } from '../bookings/booking.model.js';
-import { Payment, RazorpayWebhookEvent } from './payment.model.js';
+import { Payment, RazorpayWebhookEvent, Refund } from './payment.model.js';
 import { Driver } from '../drivers/driver.model.js';
 import { closeQrCode, verifyWebhookSignature } from './razorpay.service.js';
 import { creditTopup } from '../wallets/wallet.service.js';
+import { completeRefund, failRefund } from './payment.service.js';
 
 const router = express.Router();
 const paymentMethod = (method) => ({
@@ -95,6 +96,19 @@ async function recordFailedPayment({ payment, eventId }) {
   );
 }
 
+async function settleRefund(entity) {
+  const internalId = entity.notes?.rjsRefundId;
+  const refund = await Refund.findOne({ $or: [
+    { gatewayRefundId: entity.id },
+    ...(/^[a-f\d]{24}$/i.test(internalId || '') ? [{ _id: internalId }] : []),
+  ] });
+  if (!refund || Math.round(refund.eligibleAmount * 100) !== entity.amount) return false;
+  if (entity.status === 'processed') await completeRefund(refund.id, entity);
+  else if (entity.status === 'failed') await failRefund(refund.id, entity.id, 'Razorpay reported that the refund failed');
+  else return false;
+  return true;
+}
+
 router.post('/', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res, next) => {
   let eventRecord;
   try {
@@ -132,6 +146,12 @@ router.post('/', express.raw({ type: 'application/json', limit: '1mb' }), async 
       } else {
         eventRecord.status = 'IGNORED';
       }
+    } else if (['refund.processed', 'refund.failed'].includes(payload.event)) {
+      const refund = payload.payload?.refund?.entity;
+      if (refund && await settleRefund(refund)) {
+        eventRecord.paymentId = refund.payment_id;
+        eventRecord.status = 'PROCESSED';
+      } else eventRecord.status = 'IGNORED';
     } else {
       eventRecord.status = 'IGNORED';
     }

@@ -20,16 +20,19 @@ class WalletDesign extends StatelessWidget {
   const WalletDesign({super.key, required this.wallet, required this.showBalance,
     required this.loading, required this.paying, required this.error,
     required this.onToggle, required this.onAddMoney, required this.onRefresh,
-    required this.onCheckPayment});
+    required this.onWithdraw, required this.onCheckPayment});
   final Map<String, dynamic>? wallet;
   final bool showBalance, loading, paying;
   final String? error;
   final VoidCallback onToggle, onAddMoney;
+  final VoidCallback onWithdraw;
   final Future<void> Function() onRefresh;
   final void Function(Map) onCheckPayment;
   int get discount => (wallet?['discountPercent'] as num? ?? 5).toInt();
   List<Map<String, dynamic>> get transactions =>
     (wallet?['transactions'] as List? ?? []).cast<Map<String, dynamic>>();
+  List<Map<String, dynamic>> get withdrawals =>
+    (wallet?['withdrawals'] as List? ?? []).cast<Map<String, dynamic>>();
   void _offers(BuildContext context) => showModalBottomSheet<void>(
     context: context, isScrollControlled: true, showDragHandle: true,
     builder: (sheetContext) => SafeArea(child: Padding(padding: const EdgeInsets.all(16),
@@ -78,10 +81,15 @@ class WalletDesign extends StatelessWidget {
                   balancePaise: wallet?['balancePaise'] as num?,
                   onToggle: onToggle,
                   onAddMoney: paying || wallet == null ? null : onAddMoney,
+                  onWithdraw: paying || wallet == null || wallet?['withdrawalEnabled'] != true || (wallet?['withdrawablePaise'] as num? ?? 0) < 10000 ? null : onWithdraw,
                   paying: paying,
                 ),
                 const SizedBox(height: 10),
                 _WalletPromo(discount: discount, onOffers: () => _offers(context)),
+                if (withdrawals.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _WithdrawalStatus(item: withdrawals.first),
+                ],
                 for (final topup in (wallet?['pendingTopups'] as List? ?? [])) ...[
                   const SizedBox(height: 10),
                   _Panel(child: Row(children: [Expanded(child: Text('Pending top-up: ${_walletMoney(topup['amountPaise'] as num)}\nAlready paid? Check without paying again.',
@@ -94,7 +102,7 @@ class WalletDesign extends StatelessWidget {
                 const SizedBox(height: 10),
                 _OffersPanel(discount: discount, onAddMoney: paying || wallet == null ? null : onAddMoney),
                 const SizedBox(height: 10),
-                const Text('For RJS ride payments only. No withdrawals or transfers.',
+                const Text('Real-money balance can be withdrawn. Wallet credits are available only for RJS rides.',
                   style: TextStyle(color: AppColors.muted, fontSize: 10)),
               ],
             ),
@@ -194,11 +202,12 @@ class _WalletHeaderButton extends StatelessWidget {
 
 class _BalanceCard extends StatelessWidget {
   const _BalanceCard({required this.showBalance, required this.onToggle,
-    required this.balancePaise, required this.onAddMoney, required this.paying});
+    required this.balancePaise, required this.onAddMoney, required this.onWithdraw, required this.paying});
   final bool showBalance;
   final VoidCallback onToggle;
   final num? balancePaise;
   final VoidCallback? onAddMoney;
+  final VoidCallback? onWithdraw;
   final bool paying;
 
   @override
@@ -322,6 +331,20 @@ class _BalanceCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 5),
+                OutlinedButton.icon(
+                  onPressed: onWithdraw,
+                  icon: const Icon(Icons.account_balance_rounded, size: 16),
+                  label: const Text('Withdraw'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: Colors.white38,
+                    side: const BorderSide(color: Colors.white54),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                    textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
               ],
             ),
           ],
@@ -331,6 +354,26 @@ class _BalanceCard extends StatelessWidget {
   );
 }
 
+
+class _WithdrawalStatus extends StatelessWidget {
+  const _WithdrawalStatus({required this.item});
+  final Map<String, dynamic> item;
+  @override
+  Widget build(BuildContext context) {
+    final status = item['status']?.toString() ?? 'PENDING';
+    final completed = status == 'PAID';
+    final returned = ['REJECTED', 'FAILED', 'REVERSED'].contains(status);
+    return _Panel(child: Row(children: [
+      Icon(completed ? Icons.check_circle_rounded : returned ? Icons.replay_circle_filled_rounded : Icons.schedule_send_rounded,
+        color: completed ? Colors.green : returned ? Colors.orange : AppColors.blue),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Withdrawal ${status.toLowerCase()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.navy)),
+        Text('${_walletMoney(item['amountPaise'] as num? ?? 0)} · ${item['vpa'] ?? ''}', style: const TextStyle(fontSize: 9, color: AppColors.muted)),
+      ])),
+    ]));
+  }
+}
 
 class _WalletPromo extends StatelessWidget {
   const _WalletPromo({required this.discount, required this.onOffers});
@@ -414,11 +457,11 @@ class _RecentTransactions extends StatelessWidget {
                   style: const TextStyle(color: AppColors.muted, fontSize: 11))),
               ...List.generate(transactions.length, (i) {
               final entry = transactions[i];
-              final credit = entry['type'] == 'TOPUP';
+              final credit = entry['type'] == 'TOPUP' || entry['type'] == 'ADMIN_CREDIT' || entry['type'] == 'REFUND_CREDIT' || entry['type'] == 'WITHDRAWAL_RELEASE';
               final saved = entry['discountPaise'] as num? ?? 0;
               final item = (
-                credit ? 'Added to Wallet' : entry['description']?.toString() ?? 'Ride payment',
-                credit ? 'Via Razorpay' : saved > 0 ? 'Saved ${_walletMoney(saved)} · Wallet discount' : 'Paid with RJS Wallet',
+                entry['type'] == 'ADMIN_CREDIT' ? entry['description']?.toString() ?? 'Wallet credit' : entry['type'] == 'REFUND_CREDIT' ? entry['description']?.toString() ?? 'Ride refund' : entry['type'] == 'WITHDRAWAL_HOLD' ? 'Withdrawal requested' : entry['type'] == 'WITHDRAWAL_RELEASE' ? 'Withdrawal returned' : credit ? 'Added to Wallet' : entry['description']?.toString() ?? 'Ride payment',
+                entry['type'] == 'ADMIN_CREDIT' ? 'RJS wallet adjustment' : entry['type'] == 'REFUND_CREDIT' ? 'Refund credited by RJS' : entry['type'].toString().startsWith('WITHDRAWAL_') ? entry['description']?.toString() ?? 'Wallet withdrawal' : credit ? 'Via Razorpay' : entry['type'] == 'ADMIN_DEBIT' ? 'RJS wallet adjustment' : saved > 0 ? 'Saved ${_walletMoney(saved)} · Wallet discount' : 'Paid with RJS Wallet',
                 '${credit ? '+' : '-'} ${_walletMoney(entry['amountPaise'] as num? ?? 0)}',
                 _walletDate(entry['createdAt']), credit,
               );

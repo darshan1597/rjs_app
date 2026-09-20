@@ -16,7 +16,7 @@ export const ENDPOINT_LIMITS = { location_search: 30, fare_estimate: 20, create_
 
 export function endpointRequestScope(method, originalUrl) {
   const path = originalUrl.split('?')[0].replace(/\/$/, '');
-  if (method === 'POST' && /^\/api\/v1\/customer\/wallet\/(topups(?:\/[^/]+\/reconcile)?|rides\/[^/]+\/pay)$/.test(path)) return 'payment_creation';
+  if (method === 'POST' && /^\/api\/v1\/customer\/wallet\/(topups(?:\/[^/]+\/reconcile)?|rides\/[^/]+\/pay|withdrawals)$/.test(path)) return 'payment_creation';
   if (method === 'GET' && /^\/api\/v1\/customer\/maps\/(autocomplete|places\/[^/]+|reverse-geocode)$/.test(path)) return 'location_search';
   if ((method === 'GET' && path === '/api/v1/customer/bookings/vehicle-catalog') || (method === 'POST' && path === '/api/v1/customer/maps/route')) return 'fare_estimate';
   if (method === 'POST' && /^\/api\/v1\/driver\/trips\/[^/]+\/pickup-preview$/.test(path)) return 'fare_estimate';

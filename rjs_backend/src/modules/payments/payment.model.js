@@ -59,6 +59,10 @@ const paymentSchema = new mongoose.Schema(
             required: true, 
             min: 0 
         },
+        refundedAmount: { type: Number, min: 0, default: 0 },
+        refundReservedAmount: { type: Number, min: 0, default: 0 },
+        walletWithdrawablePaidPaise: { type: Number, min: 0, default: 0 },
+        walletRestrictedPaidPaise: { type: Number, min: 0, default: 0 },
         status: {
             type: String,
             enum: ["PENDING", "PAID", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED"],
@@ -131,6 +135,8 @@ const driverPayoutSchema = new mongoose.Schema(
         },
         payoutDate: Date,
         failureReason: String,
+        withdrawableAmountPaise: { type: Number, min: 0, default: 0 },
+        restrictedAmountPaise: { type: Number, min: 0, default: 0 },
     },
     { timestamps: true },
 );
@@ -168,9 +174,20 @@ const refundSchema = new mongoose.Schema(
         reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "AdminAccount" },
         reviewedAt: Date,
         reviewNote: String,
+        completedAt: Date,
+        gatewayRefundId: { type: String, trim: true },
+        customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', index: true },
+        channel: { type: String, enum: ['WALLET', 'RAZORPAY'] },
+        requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminAccount' },
+        requestKey: String,
+        failureReason: String,
+        withdrawableAmountPaise: { type: Number, min: 0, default: 0 },
+        restrictedAmountPaise: { type: Number, min: 0, default: 0 },
     },
     { timestamps: true },
 );
+refundSchema.index({ requestedBy: 1, requestKey: 1 }, { unique: true, sparse: true });
+refundSchema.index({ gatewayRefundId: 1 }, { unique: true, sparse: true });
 const webhookEventSchema = new mongoose.Schema(
     {
         eventId: { type: String, required: true, unique: true, index: true },

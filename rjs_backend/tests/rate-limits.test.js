@@ -27,6 +27,7 @@ it.each([
   ['POST', '/api/v1/driver/trips/abc/accept', 'driver_offer'],
   ['POST', '/api/v1/driver/trips/abc/reject', 'driver_offer'],
   ['POST', '/api/v1/driver/trips/abc/payment-qr', 'payment_creation'],
+  ['POST', '/api/v1/customer/wallet/withdrawals', 'payment_creation'],
   ['POST', '/api/v1/customer/bookings/abc/verify-payment', null],
 ])('classifies endpoint %s %s', (method, path, expected) => {
   expect(endpointRequestScope(method, path)).toBe(expected);

@@ -250,16 +250,20 @@ export default function DashboardPage() {
   const isSuperAdmin = profile?.accountType === "SUPER_ADMIN";
   useEffect(() => {
     const dashboardPath = session.admin.accountType === "SUPER_ADMIN" ? "/admin/dashboard" : "/admin/employee-dashboard";
-    Promise.all([get("/admin/auth/me", session.tokens.accessToken), get(dashboardPath, session.tokens.accessToken)])
-      .then(([account, snapshot]) => { setProfile(account.admin); setDashboard(snapshot); })
+    let active = true;
+    const load = () => Promise.all([get("/admin/auth/me", session.tokens.accessToken), get(dashboardPath, session.tokens.accessToken)])
+      .then(([account, snapshot]) => { if (active) { setProfile(account.admin); setDashboard(snapshot); } })
       .catch(() => {});
-  }, [session.tokens.accessToken]);
+    load();
+    const timer = setInterval(load, 30000);
+    return () => { active = false; clearInterval(timer); };
+  }, [session.admin.accountType, session.tokens.accessToken]);
   const dynamicMetrics = dashboard && isSuperAdmin ? [
-    ["wallet", "Total revenue", new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(dashboard.metrics.totalRevenue), "Live", "bg-emerald-50 text-emerald-600"],
+    ["wallet", "Net ride revenue", new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(dashboard.metrics.totalRevenue), "Live", "bg-emerald-50 text-emerald-600"],
     ["users", "Total employees", dashboard.metrics.totalEmployees, "Live", "bg-violet-50 text-violet-600"],
     ["users", "Active employees", dashboard.metrics.activeEmployees, "Live", "bg-blue-50 text-blue-600"],
     ["shield", "MFA enabled", dashboard.metrics.mfaEnabledEmployees, "Live", "bg-orange-50 text-orange-500"],
-    ["audit", "Security events", dashboard.metrics.auditEvents, "Last 30 days", "bg-amber-50 text-amber-500"],
+    ["audit", "Audit events", dashboard.metrics.auditEvents, "Last 30 days", "bg-amber-50 text-amber-500"],
   ] : dashboard ? [
     ["bookings", "Today's bookings", dashboard.metrics.todayBookings, "Live", "bg-blue-50 text-blue-600"],
     ["drivers", "Live trips", dashboard.metrics.liveTrips, "Live", "bg-emerald-50 text-emerald-600"],
@@ -267,11 +271,11 @@ export default function DashboardPage() {
     ["audit", "Completed today", dashboard.metrics.completedToday, "Live", "bg-violet-50 text-violet-600"],
     ["wallet", "Collected today", new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(dashboard.metrics.todayRevenue), "Live", "bg-amber-50 text-amber-500"],
   ] : isSuperAdmin ? [
-    ["wallet", "Total revenue", null, "", "bg-emerald-50 text-emerald-600"],
+    ["wallet", "Net ride revenue", null, "", "bg-emerald-50 text-emerald-600"],
     ["users", "Total employees", null, "", "bg-violet-50 text-violet-600"],
     ["users", "Active employees", null, "", "bg-blue-50 text-blue-600"],
     ["shield", "MFA enabled", null, "", "bg-orange-50 text-orange-500"],
-    ["audit", "Security events", null, "", "bg-amber-50 text-amber-500"],
+    ["audit", "Audit events", null, "", "bg-amber-50 text-amber-500"],
   ] : [
     ["bookings", "Today's bookings", null, "", "bg-blue-50 text-blue-600"],
     ["drivers", "Live trips", null, "", "bg-emerald-50 text-emerald-600"],
@@ -281,7 +285,7 @@ export default function DashboardPage() {
   ];
   const bookingStatuses = dashboard?.bookingStatuses || [];
   const statusColors = ["bg-emerald-500", "bg-blue-500", "bg-orange-500", "bg-amber-400", "bg-slate-400", "bg-red-500"];
-  const recentRows = dashboard?.recentBookings?.map((booking) => [booking.bookingNumber || `#${String(booking._id).slice(-6).toUpperCase()}`, booking.customerName || "Customer", booking.serviceType || "Ride", booking.status || "PENDING", new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(booking.totalAmount || booking.amount || 0)]) || [];
+  const recentRows = dashboard?.recentBookings?.map((booking) => [booking.bookingNumber || `#${String(booking._id).slice(-6).toUpperCase()}`, booking.customer?.name || "Customer", booking.serviceType || "Ride", booking.status || "PENDING", new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(booking.totalAmount || booking.amount || 0)]) || [];
   const driverRows = dashboard?.drivers?.map((driver) => {
     const name = driver.personal?.fullName || "Driver";
     const category = driver.vehicle?.category?.replaceAll("_", " ");

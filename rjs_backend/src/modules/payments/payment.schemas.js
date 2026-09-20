@@ -26,4 +26,9 @@ const refundActionSchema = z.object({
     params: z.object({ refundId: id }),
     query: empty,
 });
-export { listPaymentsSchema, payoutActionSchema, refundActionSchema };
+const createRefundSchema = z.object({
+  body: z.object({ amount: z.number().positive().max(1000000), reason: z.string().trim().min(10).max(500),
+    requestKey: z.string().regex(/^[a-zA-Z0-9_-]{16,100}$/) }),
+  params: z.object({ paymentId: id }), query: empty,
+});
+export { listPaymentsSchema, payoutActionSchema, refundActionSchema, createRefundSchema };

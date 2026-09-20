@@ -31,6 +31,9 @@ import { createRequestMonitoring } from './common/middleware/request-monitoring.
 import { authenticateAdmin } from './modules/admins/admin-auth.middleware.js';
 import { AppError } from './common/errors/app-error.js';
 import { customerWalletRouter } from './modules/wallets/wallet.routes.js';
+import { adminWalletRouter } from './modules/wallets/admin-wallet.routes.js';
+import { financeRouter } from './modules/finance/finance.routes.js';
+import { razorpayxWebhookRouter } from './modules/wallets/razorpayx-webhook.routes.js';
 
 function createApp() {
   const app = express();
@@ -55,6 +58,7 @@ function createApp() {
     credentials: true,
   }));
   app.use('/api/v1/payments/razorpay/webhook', razorpayWebhookRouter);
+  app.use('/api/v1/payments/razorpayx/webhook', razorpayxWebhookRouter);
   // Coarse per-IP abuse guard, not a shared server-wide request quota.
   app.use(createLimiter({ windowMs: 60000, limit: 6000 }));
   app.use(express.json({ limit: '1mb' }));
@@ -81,6 +85,8 @@ function createApp() {
   app.use('/api/v1/media/driver-files', driverFiles);
   app.use('/api/v1/media/vehicle-images', vehicleImages);
   app.use('/api/v1/admin/payments', paymentRouter);
+  app.use('/api/v1/admin/wallets', adminWalletRouter);
+  app.use('/api/v1/admin/finance', financeRouter);
   app.use('/api/v1/admin/support-tickets', supportRouter);
   app.use('/api/v1/customer/auth', customerAuthRouter);
   app.use('/api/v1/customer/addresses', customerAddressRouter);

@@ -13,12 +13,15 @@ import {
   LuClipboardPenLine,
   LuUsers,
   LuWalletCards,
+  LuChartNoAxesCombined,
 } from "react-icons/lu";
 import Brand from "./Brand.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const superLinks = [
   ["/", LuLayoutDashboard, "Dashboard"],
+  ["/wallets", LuWalletCards, "Wallets"],
+  ["/finance", LuChartNoAxesCombined, "Finance"],
   ["/employees", LuUsers, "Employees"],
   ["/audit-logs", LuCircleCheck, "Audit logs"],
   ["/system-settings", LuSettings, "System settings"],
@@ -32,6 +35,7 @@ const employeeLinks = [
   ["/custom-enquiries", LuClipboardPenLine, "Custom enquiries"],
   ["/tour-packages", LuPackageOpen, "Tour packages"],
   ["/payments", LuWalletCards, "Payments"],
+  ["/wallets", LuWalletCards, "Wallets"],
   ["/support-tickets", LuLifeBuoy, "Support tickets"],
 ];
 

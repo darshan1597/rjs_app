@@ -3,13 +3,24 @@ import request from 'supertest';
 import { vi } from 'vitest';
 vi.mock('../src/config/env.js', () => ({ env: { RAZORPAY_KEY_ID: 'test-key' } }));
 vi.mock('../src/modules/customers/customer-auth.middleware.js', () => ({ authenticateCustomer: (req, res, next) => { req.customer = { id: 'customer' }; next(); } }));
-vi.mock('../src/modules/wallets/wallet.model.js', () => ({ WalletTopup: { findOne: vi.fn(), updateOne: vi.fn() }, WalletLedger: {} }));
+vi.mock('../src/modules/wallets/wallet.model.js', () => ({
+  WalletTopup: { findOne: vi.fn(), updateOne: vi.fn() },
+  WalletLedger: {},
+  WalletEvent: { findOne: vi.fn(), findOneAndUpdate: vi.fn() },
+}));
 vi.mock('../src/modules/wallets/wallet.service.js', () => ({ ensureWallet: vi.fn(), creditTopup: vi.fn(), payRideWithWallet: vi.fn(), walletQuote: vi.fn() }));
 vi.mock('../src/modules/payments/razorpay.service.js', () => ({ createWalletOrder: vi.fn(), fetchPayment: vi.fn(), fetchOrderPayments: vi.fn(), verifyCheckoutSignature: vi.fn() }));
-import { WalletTopup } from '../src/modules/wallets/wallet.model.js';
+vi.mock('../src/modules/wallets/wallet-withdrawal.service.js', () => ({
+  listCustomerWithdrawals: vi.fn().mockResolvedValue([]), requestWithdrawal: vi.fn(),
+}));
+vi.mock('../src/modules/wallets/razorpayx.service.js', () => ({
+  isPayoutConfigured: vi.fn().mockReturnValue(true), requirePayoutConfig: vi.fn(),
+}));
+import { WalletEvent, WalletTopup } from '../src/modules/wallets/wallet.model.js';
 import { creditTopup } from '../src/modules/wallets/wallet.service.js';
 import { fetchPayment, fetchOrderPayments, verifyCheckoutSignature } from '../src/modules/payments/razorpay.service.js';
 import { customerWalletRouter } from '../src/modules/wallets/wallet.routes.js';
+import { requestWithdrawal } from '../src/modules/wallets/wallet-withdrawal.service.js';
 import { errorHandler } from '../src/common/middleware/error-handler.js';
 const app = express();
 app.use(express.json());
@@ -58,4 +69,35 @@ it('does not credit authorized-only payments during reconciliation', async () =>
   const response = await request(app).post(`/wallet/topups/${id}/reconcile`).send({});
   expect(response.body.data.credited).toBe(false);
   expect(creditTopup).not.toHaveBeenCalled();
+});
+it('atomically claims a wallet credit celebration once', async () => {
+  const event = { _id: id, amountPaise: 1000, title: 'Wallet credit received' };
+  WalletEvent.findOneAndUpdate
+    .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(event) })
+    .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(null) });
+  const first = await request(app).post('/wallet/events/claim').send({});
+  const second = await request(app).post('/wallet/events/claim').send({});
+  expect(first.status).toBe(200);
+  expect(first.body.data.event.amountPaise).toBe(1000);
+  expect(second.body.data.event).toBeNull();
+  expect(WalletEvent.findOneAndUpdate).toHaveBeenCalledWith(
+    { customerId: 'customer', seenAt: { $exists: false } },
+    { $set: { seenAt: expect.any(Date) } },
+    { new: true, sort: { createdAt: 1 } },
+  );
+});
+it('submits a validated withdrawal for the authenticated customer', async () => {
+  requestWithdrawal.mockResolvedValue({ _id: id, status: 'PENDING', amountPaise: 10000 });
+  const response = await request(app).post('/wallet/withdrawals').send({
+    amountPaise: 10000, vpa: 'customer@upi', idempotencyKey: 'withdrawal-request-key-1234',
+  });
+  expect(response.status).toBe(201);
+  expect(requestWithdrawal).toHaveBeenCalledWith({ customerId: 'customer', amountPaise: 10000,
+    vpa: 'customer@upi', idempotencyKey: 'withdrawal-request-key-1234' });
+});
+it('rejects invalid withdrawal amounts and UPI IDs before touching money', async () => {
+  expect((await request(app).post('/wallet/withdrawals').send({
+    amountPaise: 9999, vpa: 'not-upi', idempotencyKey: 'withdrawal-request-key-1234',
+  })).status).toBe(422);
+  expect(requestWithdrawal).not.toHaveBeenCalled();
 });

@@ -1,14 +1,15 @@
 import express from "express";
 import { validate } from "../../common/middleware/validate.js";
-import {authenticateAdmin, requireEmployee,} from "../admins/admin-auth.middleware.js";
-import {listPayments, retryPayout, reviewRefund,} from "./payment.controller.js";
-import {listPaymentsSchema, payoutActionSchema, refundActionSchema,} from "./payment.schemas.js";
+import {authenticateAdmin, requireEmployee, requireSuperAdmin,} from "../admins/admin-auth.middleware.js";
+import {createRefundRequest, listPayments, retryPayout, reviewRefund,} from "./payment.controller.js";
+import {createRefundSchema, listPaymentsSchema, payoutActionSchema, refundActionSchema,} from "./payment.schemas.js";
 
 const paymentRouter = express.Router();
 
-paymentRouter.use(authenticateAdmin, requireEmployee);
-paymentRouter.get("/", validate(listPaymentsSchema), listPayments);
-paymentRouter.post("/payouts/:payoutId/retry", validate(payoutActionSchema), retryPayout,);
-paymentRouter.post("/refunds/:refundId/review", validate(refundActionSchema), reviewRefund,);
+paymentRouter.use(authenticateAdmin);
+paymentRouter.get("/", requireEmployee, validate(listPaymentsSchema), listPayments);
+paymentRouter.post("/:paymentId/refunds", requireEmployee, validate(createRefundSchema), createRefundRequest);
+paymentRouter.post("/payouts/:payoutId/retry", requireEmployee, validate(payoutActionSchema), retryPayout,);
+paymentRouter.post("/refunds/:refundId/review", requireSuperAdmin, validate(refundActionSchema), reviewRefund,);
 
 export { paymentRouter };

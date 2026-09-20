@@ -16,6 +16,8 @@ import BookingsPage from './pages/BookingsPage.jsx';
 import TourPackagesPage from './pages/TourPackagesPage.jsx';
 import TourPackageEditorPage from './pages/TourPackageEditorPage.jsx';
 import PaymentsPage from './pages/PaymentsPage.jsx';
+import WalletsPage from './pages/WalletsPage.jsx';
+import FinancePage from './pages/FinancePage.jsx';
 import DriverDetailsPage from './pages/DriverDetailsPage.jsx';
 import BookingDetailsPage from './pages/BookingDetailsPage.jsx';
 import SupportTicketsPage from './pages/SupportTicketsPage.jsx';
@@ -59,6 +61,8 @@ export default function App() {
       <Route path="/tour-packages/add" element={admin ? (admin.accountType === 'EMPLOYEE' ? <TourPackageEditorPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/tour-packages/:id/edit" element={admin ? (admin.accountType === 'EMPLOYEE' ? <TourPackageEditorPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="/payments" element={admin ? (admin.accountType === 'EMPLOYEE' ? <PaymentsPage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
+      <Route path="/wallets" element={admin ? <WalletsPage /> : <Navigate to="/login" replace />} />
+      <Route path="/finance" element={admin ? (admin.accountType === 'SUPER_ADMIN' ? <FinancePage /> : <Navigate to="/" replace />) : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to={admin ? signedInPath : '/login'} replace />} />
     </Routes>
   );

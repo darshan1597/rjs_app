@@ -6,10 +6,12 @@ import { AppError } from '../../common/errors/app-error.js';
 import { env } from '../../config/env.js';
 import { createSingleFlight } from '../../common/single-flight.js';
 import { createWalletOrder, fetchPayment, verifyCheckoutSignature } from '../payments/razorpay.service.js';
-import { WalletTopup, WalletLedger } from './wallet.model.js';
+import { WalletTopup, WalletLedger, WalletEvent } from './wallet.model.js';
 import { ensureWallet, creditTopup, payRideWithWallet, walletQuote } from './wallet.service.js';
 import { Booking } from '../bookings/booking.model.js';
 import { reconcileTopup, sweepWalletTopups } from './wallet-cleanup.service.js';
+import { listCustomerWithdrawals, requestWithdrawal } from './wallet-withdrawal.service.js';
+import { isPayoutConfigured, requirePayoutConfig } from './razorpayx.service.js';
 const router = express.Router();
 const flight = createSingleFlight();
 const empty = z.object({});
@@ -22,7 +24,41 @@ router.get('/', async (req, res, next) => {
     const wallet = await ensureWallet(req.customer.id);
     const transactions = await WalletLedger.find({ customerId: req.customer.id }).sort({ createdAt: -1, _id: -1 }).limit(50).lean();
     const pendingTopups = await WalletTopup.find({ customerId: req.customer.id, status: 'PENDING', archivedAt: { $exists: false }, orderId: { $exists: true } }).sort({ createdAt: -1 }).limit(5).lean();
-    res.json({ success: true, data: { balancePaise: wallet.balancePaise, discountPercent: 5, transactions, pendingTopups } });
+    const [celebration, withdrawals] = await Promise.all([
+      WalletEvent.findOne({ customerId: req.customer.id, seenAt: { $exists: false } }).sort({ createdAt: 1 }).lean(),
+      listCustomerWithdrawals(req.customer.id),
+    ]);
+    res.json({ success: true, data: { balancePaise: wallet.balancePaise, withdrawablePaise: wallet.withdrawablePaise,
+      withdrawalEnabled: isPayoutConfigured(), discountPercent: 5, transactions, pendingTopups, celebration, withdrawals } });
+  } catch (error) { next(error); }
+});
+router.post('/events/claim', validate(schema(empty)), async (req, res, next) => {
+  try {
+    const event = await WalletEvent.findOneAndUpdate(
+      { customerId: req.customer.id, seenAt: { $exists: false } },
+      { $set: { seenAt: new Date() } },
+      { new: true, sort: { createdAt: 1 } },
+    ).lean();
+    res.json({ success: true, data: { event } });
+  } catch (error) { next(error); }
+});
+router.post('/events/:eventId/seen', validate(schema(empty, z.object({ eventId: id }))), async (req, res, next) => {
+  try {
+    const event = await WalletEvent.findOneAndUpdate({ _id: req.validated.params.eventId, customerId: req.customer.id,
+      seenAt: { $exists: false } }, { $set: { seenAt: new Date() } }, { new: true });
+    if (!event) throw new AppError(404, 'WALLET_EVENT_NOT_FOUND', 'Wallet notification was not found');
+    res.json({ success: true, data: { seen: true } });
+  } catch (error) { next(error); }
+});
+router.post('/withdrawals', validate(schema(z.object({
+  amountPaise: z.number().int().min(10000).max(1000000),
+  vpa: z.string().trim().toLowerCase().regex(/^[a-z0-9._-]{2,256}@[a-z0-9.-]{2,64}$/),
+  idempotencyKey: z.string().regex(/^[a-zA-Z0-9_-]{16,100}$/),
+}))), async (req, res, next) => {
+  try {
+    requirePayoutConfig();
+    const withdrawal = await requestWithdrawal({ customerId: req.customer.id, ...req.validated.body });
+    res.status(201).json({ success: true, data: withdrawal });
   } catch (error) { next(error); }
 });
 router.post('/topups', validate(schema(z.object({ amountPaise: z.number().int().min(10000).max(1000000), retryKey: z.string().regex(/^[a-zA-Z0-9_-]{16,100}$/) }))), async (req, res, next) => {

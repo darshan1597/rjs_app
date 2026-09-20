@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 import { vi } from 'vitest';
 vi.mock('../src/modules/wallets/wallet.model.js', () => ({
-  Wallet: { init: vi.fn(), findOneAndUpdate: vi.fn() },
+  Wallet: { init: vi.fn(), findOne: vi.fn(), findOneAndUpdate: vi.fn() },
   WalletTopup: { init: vi.fn(), findOne: vi.fn(), findOneAndUpdate: vi.fn() },
-  WalletLedger: { init: vi.fn(), create: vi.fn() },
+  WalletLedger: { init: vi.fn(), create: vi.fn(), find: vi.fn(), bulkWrite: vi.fn() },
 }));
 vi.mock('../src/modules/bookings/booking.model.js', () => ({ Booking: { findOne: vi.fn() } }));
 vi.mock('../src/modules/payments/payment.model.js', () => ({ Payment: { init: vi.fn(), create: vi.fn() } }));
@@ -16,7 +16,9 @@ let booking;
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(mongoose.connection, 'transaction').mockImplementation((operation) => operation('session'));
-  Wallet.findOneAndUpdate.mockResolvedValue({ balancePaise: 100000 });
+  const wallet = { _id: 'wallet', balancePaise: 100000, withdrawablePaise: 100000, restrictedPaise: 0, balanceVersion: 2 };
+  Wallet.findOneAndUpdate.mockResolvedValue(wallet);
+  Wallet.findOne.mockReturnValue({ session: async () => wallet });
   booking = { id: 'ride', _id: 'ride', totalAmount: 100, status: 'PAYMENT_PENDING', paymentStatus: 'PENDING',
     customer: { name: 'Test', phone: '6666666666' }, statusHistory: [], save: vi.fn() };
   Booking.findOne.mockReturnValue({ session: async () => booking });
@@ -57,7 +59,14 @@ it('pays the discounted bill and makes repeats idempotent', async () => {
   expect(booking.walletDiscountAmount).toBe(5);
   expect(booking.status).toBe('COMPLETED');
   expect(Payment.create).toHaveBeenCalledTimes(1);
-  expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith({ customerId: 'customer', balancePaise: { $gte: 9500 } }, { $inc: { balancePaise: -9500 } }, { new: true, session: 'session' });
+  expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+    { _id: 'wallet', balancePaise: { $gte: 9500 }, restrictedPaise: { $gte: 0 }, withdrawablePaise: { $gte: 9500 } },
+    { $inc: { balancePaise: -9500, restrictedPaise: -0, withdrawablePaise: -9500 } },
+    { new: true, session: 'session' },
+  );
+  expect(Payment.create).toHaveBeenCalledWith([expect.objectContaining({
+    walletWithdrawablePaidPaise: 9500, walletRestrictedPaidPaise: 0,
+  })], { session: 'session' });
 });
 it('enforces booking ownership', async () => {
   Booking.findOne.mockReturnValue({ session: async () => null });
@@ -75,7 +84,7 @@ it.each(['paymentChannel', 'razorpayOrderId', 'razorpayQrCodeId'])('blocks an ac
   expect(Payment.create).not.toHaveBeenCalled();
 });
 it('does not complete a ride with insufficient balance', async () => {
-  Wallet.findOneAndUpdate.mockResolvedValueOnce({ balancePaise: 0 }).mockResolvedValueOnce(null);
+  Wallet.findOne.mockReturnValue({ session: async () => null });
   await expect(payRideWithWallet('customer', 'ride')).rejects.toMatchObject({ code: 'INSUFFICIENT_WALLET_BALANCE' });
   expect(booking.save).not.toHaveBeenCalled();
   expect(WalletLedger.create).not.toHaveBeenCalled();

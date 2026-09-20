@@ -4,12 +4,14 @@ import { vi } from 'vitest';
 vi.mock('../src/modules/wallets/wallet.service.js', () => ({ creditTopup: vi.fn().mockResolvedValue(false) }));
 
 vi.mock('../src/modules/bookings/booking.model.js', () => ({ Booking: { findOne: vi.fn() } }));
-vi.mock('../src/modules/payments/payment.model.js', () => ({ Payment: { findOneAndUpdate: vi.fn() }, RazorpayWebhookEvent: { create: vi.fn(), deleteOne: vi.fn() } }));
+vi.mock('../src/modules/payments/payment.model.js', () => ({ Payment: { findOneAndUpdate: vi.fn() }, Refund: { findOne: vi.fn(), updateOne: vi.fn() }, RazorpayWebhookEvent: { create: vi.fn(), deleteOne: vi.fn() } }));
+vi.mock('../src/modules/payments/payment.service.js', () => ({ completeRefund: vi.fn(), failRefund: vi.fn() }));
 vi.mock('../src/modules/drivers/driver.model.js', () => ({ Driver: { updateOne: vi.fn() } }));
 vi.mock('../src/modules/payments/razorpay.service.js', () => ({ closeQrCode: vi.fn(), verifyWebhookSignature: vi.fn() }));
 
 import { Booking } from '../src/modules/bookings/booking.model.js';
-import { Payment, RazorpayWebhookEvent } from '../src/modules/payments/payment.model.js';
+import { Payment, RazorpayWebhookEvent, Refund } from '../src/modules/payments/payment.model.js';
+import { completeRefund, failRefund } from '../src/modules/payments/payment.service.js';
 import { Driver } from '../src/modules/drivers/driver.model.js';
 import { verifyWebhookSignature } from '../src/modules/payments/razorpay.service.js';
 import { razorpayWebhookRouter } from '../src/modules/payments/razorpay-webhook.routes.js';
@@ -72,4 +74,20 @@ it('ignores duplicate delivery', async () => {
   RazorpayWebhookEvent.create.mockRejectedValue({ code: 11000 });
   expect((await send(payload())).body.duplicate).toBe(true);
   expect(Booking.findOne).not.toHaveBeenCalled();
+});
+it('completes the matching refund from a signed Razorpay webhook', async () => {
+  Refund.findOne.mockResolvedValue({ id: 'refund-record', eligibleAmount: 50 });
+  const body = { event: 'refund.processed', payload: { refund: { entity: {
+    id: 'rfnd_gateway', payment_id: 'pay_test', amount: 5000, status: 'processed', notes: { rjsRefundId: 'a'.repeat(24) },
+  } } } };
+  expect((await send(body)).status).toBe(200);
+  expect(completeRefund).toHaveBeenCalledWith('refund-record', expect.objectContaining({ id: 'rfnd_gateway' }));
+});
+it('releases a matching failed Razorpay refund for safe retry', async () => {
+  Refund.findOne.mockResolvedValue({ id: 'refund-record', eligibleAmount: 50 });
+  const body = { event: 'refund.failed', payload: { refund: { entity: {
+    id: 'rfnd_gateway', payment_id: 'pay_test', amount: 5000, status: 'failed', notes: { rjsRefundId: 'a'.repeat(24) },
+  } } } };
+  expect((await send(body)).status).toBe(200);
+  expect(failRefund).toHaveBeenCalledWith('refund-record', 'rfnd_gateway', expect.stringContaining('failed'));
 });
