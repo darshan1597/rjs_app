@@ -6,7 +6,7 @@ import { AppError } from '../../common/errors/app-error.js';
 import { env } from '../../config/env.js';
 import { createSingleFlight } from '../../common/single-flight.js';
 import { createWalletOrder, fetchPayment, verifyCheckoutSignature } from '../payments/razorpay.service.js';
-import { WalletTopup, WalletLedger, WalletEvent } from './wallet.model.js';
+import { WalletTopup, WalletLedger, WalletEvent, WalletWithdrawal } from './wallet.model.js';
 import { ensureWallet, creditTopup, payRideWithWallet, walletQuote } from './wallet.service.js';
 import { Booking } from '../bookings/booking.model.js';
 import { reconcileTopup, sweepWalletTopups } from './wallet-cleanup.service.js';
@@ -24,11 +24,16 @@ router.get('/', async (req, res, next) => {
     const wallet = await ensureWallet(req.customer.id);
     const transactions = await WalletLedger.find({ customerId: req.customer.id }).sort({ createdAt: -1, _id: -1 }).limit(50).lean();
     const pendingTopups = await WalletTopup.find({ customerId: req.customer.id, status: 'PENDING', archivedAt: { $exists: false }, orderId: { $exists: true } }).sort({ createdAt: -1 }).limit(5).lean();
-    const [celebration, withdrawals] = await Promise.all([
+    const [celebration, withdrawals, locked] = await Promise.all([
       WalletEvent.findOne({ customerId: req.customer.id, seenAt: { $exists: false } }).sort({ createdAt: 1 }).lean(),
       listCustomerWithdrawals(req.customer.id),
+      WalletWithdrawal.aggregate([
+        { $match: { customerId: wallet.customerId, status: { $in: ['PENDING', 'PROCESSING'] } } },
+        { $group: { _id: null, amountPaise: { $sum: '$amountPaise' } } },
+      ]),
     ]);
     res.json({ success: true, data: { balancePaise: wallet.balancePaise, withdrawablePaise: wallet.withdrawablePaise,
+      restrictedPaise: wallet.restrictedPaise, lockedPaise: locked[0]?.amountPaise ?? 0,
       withdrawalEnabled: isPayoutConfigured(), discountPercent: 5, transactions, pendingTopups, celebration, withdrawals } });
   } catch (error) { next(error); }
 });

@@ -26,6 +26,7 @@ const customerSchema = new mongoose.Schema(
             default: false 
         },
         lastLoginAt: Date,
+        favoritePlacesRevision: { type: Number, default: 0 },
     },
     { timestamps: true },
 );

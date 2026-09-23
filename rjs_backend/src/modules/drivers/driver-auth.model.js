@@ -36,6 +36,8 @@ const driverSessionSchema = new mongoose.Schema({
     index: { expires: 0 } 
   },
   revokedAt: Date,
+  pushToken: { type: String, select: false },
+  pushPlatform: { type: String, enum: ['android', 'ios'] },
   userAgent: String,
   ip: String,
 }, { timestamps: true });

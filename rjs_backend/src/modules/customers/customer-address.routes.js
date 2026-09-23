@@ -1,9 +1,11 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import { AppError } from '../../common/errors/app-error.js';
 import { validate } from '../../common/middleware/validate.js';
 import { authenticateCustomer } from './customer-auth.middleware.js';
 import { CustomerAddress } from './customer-address.model.js';
+import { Customer } from './customer.model.js';
 
 const router = express.Router();
 const empty = z.object({});
@@ -24,6 +26,18 @@ const fields = z.object({
 const createSchema = z.object({ body: fields, params: empty, query: empty });
 const updateSchema = z.object({ body: fields, params: z.object({ id }), query: empty });
 const idSchema = z.object({ body: empty, params: z.object({ id }), query: empty });
+const favoriteLimit = 5;
+
+async function lockFavoriteWrites(customerId, session) {
+  const result = await Customer.updateOne({ _id: customerId },
+    { $inc: { favoritePlacesRevision: 1 } }, { session });
+  if (result.matchedCount !== 1) throw new AppError(404, 'CUSTOMER_NOT_FOUND', 'Customer was not found');
+}
+
+async function assertFavoriteCapacity(customerId, session) {
+  const count = await CustomerAddress.countDocuments({ customerId, type: 'FAVORITE' }).session(session);
+  if (count >= favoriteLimit) throw new AppError(409, 'FAVORITE_LIMIT_REACHED', 'You can save up to 5 favorite places');
+}
 
 const toSafeObject = (address) => ({
   id: address.id,
@@ -51,13 +65,18 @@ router.get('/', async (req, res, next) => {
 router.post('/', validate(createSchema), async (req, res, next) => {
   try {
     const values = { ...req.validated.body, customerId: req.customer.id };
-    const address = ['HOME', 'WORK'].includes(values.type)
-      ? await CustomerAddress.findOneAndUpdate(
+    const address = values.type === 'FAVORITE'
+      ? await mongoose.connection.transaction(async (session) => {
+        await lockFavoriteWrites(req.customer.id, session);
+        await assertFavoriteCapacity(req.customer.id, session);
+        const [created] = await CustomerAddress.create([values], { session });
+        return created;
+      })
+      : await CustomerAddress.findOneAndUpdate(
         { customerId: req.customer.id, type: values.type },
         { $set: values },
         { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
-      )
-      : await CustomerAddress.create(values);
+      );
     return res.status(201).json({ success: true, data: { address: toSafeObject(address) } });
   } catch (error) {
     return next(error);
@@ -66,11 +85,19 @@ router.post('/', validate(createSchema), async (req, res, next) => {
 
 router.patch('/:id', validate(updateSchema), async (req, res, next) => {
   try {
-    const address = await CustomerAddress.findOneAndUpdate(
-      { _id: req.validated.params.id, customerId: req.customer.id },
-      { $set: req.validated.body },
-      { new: true, runValidators: true },
-    );
+    const filter = { _id: req.validated.params.id, customerId: req.customer.id };
+    const update = { $set: req.validated.body };
+    const address = req.validated.body.type === 'FAVORITE'
+      ? await mongoose.connection.transaction(async (session) => {
+        await lockFavoriteWrites(req.customer.id, session);
+        const existing = await CustomerAddress.findOne(filter).session(session);
+        if (!existing) throw new AppError(404, 'ADDRESS_NOT_FOUND', 'Saved place not found');
+        if (existing.type !== 'FAVORITE') await assertFavoriteCapacity(req.customer.id, session);
+        return CustomerAddress.findOneAndUpdate(filter, update,
+          { new: true, runValidators: true, session });
+      })
+      : await CustomerAddress.findOneAndUpdate(filter, update,
+        { new: true, runValidators: true });
     if (!address) throw new AppError(404, 'ADDRESS_NOT_FOUND', 'Saved place not found');
     return res.json({ success: true, data: { address: toSafeObject(address) } });
   } catch (error) {

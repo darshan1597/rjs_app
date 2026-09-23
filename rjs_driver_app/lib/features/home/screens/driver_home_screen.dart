@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/network/driver_api_service.dart';
 import '../../../core/location/driver_location_service.dart';
+import '../../../core/notifications/driver_push_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
 import '../../earnings/screens/earnings_screen.dart';
@@ -36,6 +37,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   @override
   void initState() {
     super.initState();
+    DriverPushService.registerCurrentDevice();
     DriverApiService.session().then((session) {
       if (mounted) setState(() => _driver = session?['driver'] as Map<String, dynamic>?);
     });
@@ -251,6 +253,36 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     }
   }
 
+  Future<void> _markCustomerNoShow() async {
+    final trip = _activeTrip;
+    if (trip == null || _tripBusy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Customer no-show?'),
+        content: const Text('Only mark this if you are at the pickup and the customer has not appeared after 10 minutes. The ride will end without a charge.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Keep waiting')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Mark no-show')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _tripBusy = true);
+    try {
+      await DriverApiService.markCustomerNoShow(trip['id'].toString());
+      await DriverLocationService.stop();
+      if (mounted) {
+        setState(() => _activeTrip = null);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Customer no-show recorded')));
+      }
+    } catch (error) {
+      if (mounted) _showError(error);
+    } finally {
+      if (mounted) setState(() => _tripBusy = false);
+    }
+  }
+
   Future<Map<String, double>?> _askForFinalCharges() async {
     final parking = TextEditingController(text: '0');
     final toll = TextEditingController(text: '0');
@@ -338,6 +370,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   busy: _tripBusy,
                   onAction: _advanceTrip,
                   onArrived: () => _advanceTrip(arrive: true),
+                  onCustomerNoShow: _markCustomerNoShow,
                 ),
                 const SizedBox(height: 11),
               ],

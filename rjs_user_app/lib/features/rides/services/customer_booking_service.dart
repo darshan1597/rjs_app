@@ -69,10 +69,10 @@ class CustomerBookingService {
     return data['receipt'] as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> cancel(String bookingId) async {
+  static Future<Map<String, dynamic>> cancel(String bookingId, {String? reason}) async {
     final data = await CustomerAuthService.authorizedPost(
       'customer/bookings/$bookingId/cancel',
-      const {},
+      {if (reason != null) 'reason': reason},
     );
     return data['booking'] as Map<String, dynamic>;
   }

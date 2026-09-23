@@ -95,6 +95,43 @@ class DriverApiService {
     await prefs.remove(_sessionKey);
   }
 
+  static Future<void> registerPushToken(String token) async {
+    _decode(
+      await _authorized(
+        (headers) => http
+            .put(
+              _apiUri('driver/reminders/device', 'PUT'),
+              headers: headers,
+              body: jsonEncode({'token': token, 'platform': 'android'}),
+            )
+            .timeout(const Duration(seconds: 15)),
+      ),
+    );
+  }
+
+  static Future<void> unregisterPushToken() async {
+    _decode(
+      await _authorized(
+        (headers) => http
+            .delete(
+              _apiUri('driver/reminders/device', 'DELETE'),
+              headers: headers,
+            )
+            .timeout(const Duration(seconds: 15)),
+      ),
+    );
+  }
+
+  static Future<List<Map<String, dynamic>>> reminders() async {
+    final data = await get('driver/reminders');
+    return (data['reminders'] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> markRemindersRead() async {
+    await post('driver/reminders/read-all');
+  }
+
   static Future<Map<String, dynamic>?> session() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_sessionKey);
@@ -199,12 +236,13 @@ class DriverApiService {
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever)
+        permission == LocationPermission.deniedForever) {
       return;
+    }
     final position = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
-    await _decode(
+    _decode(
       await _authorized(
         (headers) => http
             .patch(
@@ -272,7 +310,9 @@ class DriverApiService {
     return data['trip'] as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> pickupLocation({bool requirePrecise = false}) async {
+  static Future<Map<String, dynamic>> pickupLocation({
+    bool requirePrecise = false,
+  }) async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw Exception('Turn on phone location');
     }
@@ -291,8 +331,12 @@ class DriverApiService {
       final age = DateTime.now().difference(position.timestamp);
       if (age > const Duration(seconds: 30) ||
           age < const Duration(seconds: -30) ||
-          !position.accuracy.isFinite || position.accuracy < 0 || position.accuracy > 50) {
-        throw Exception('Your GPS location is not accurate enough yet. Enable precise location, move outdoors, and try again.');
+          !position.accuracy.isFinite ||
+          position.accuracy < 0 ||
+          position.accuracy > 50) {
+        throw Exception(
+          'Your GPS location is not accurate enough yet. Enable precise location, move outdoors, and try again.',
+        );
       }
     }
     return {
@@ -324,6 +368,11 @@ class DriverApiService {
       'latitude': position.latitude,
       'longitude': position.longitude,
     });
+    return data['trip'] as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> markCustomerNoShow(String bookingId) async {
+    final data = await post('driver/trips/$bookingId/customer-no-show', {});
     return data['trip'] as Map<String, dynamic>;
   }
 

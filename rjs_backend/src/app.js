@@ -25,6 +25,7 @@ import { customerAddressRouter } from './modules/customers/customer-address.rout
 import { customerBookingRouter } from './modules/customers/customer-booking.routes.js';
 import { driverAuthRouter } from './modules/drivers/driver-auth.routes.js';
 import { driverTripRouter } from './modules/drivers/driver-trip.routes.js';
+import { driverReminderRouter } from './modules/drivers/driver-reminder.routes.js';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes.js';
 import { customerMapRouter } from './modules/maps/customer-map.routes.js';
 import { createRequestMonitoring } from './common/middleware/request-monitoring.js';
@@ -95,6 +96,7 @@ function createApp() {
   app.use('/api/v1/customer/maps', customerMapRouter);
   app.use('/api/v1/driver/auth', driverAuthRouter);
   app.use('/api/v1/driver/trips', driverTripRouter);
+  app.use('/api/v1/driver/reminders', driverReminderRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

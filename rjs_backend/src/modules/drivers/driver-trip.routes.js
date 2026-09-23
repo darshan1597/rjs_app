@@ -9,7 +9,10 @@ import { calculateLocalFare } from '../bookings/local-fare.service.js';
 import { createQrCode } from '../payments/razorpay.service.js';
 import { authenticateDriver } from './driver-auth.middleware.js';
 import { scheduledPickupState } from '../bookings/scheduled-pickup-policy.js';
-import { preparePickup, pickupPreparationState } from '../bookings/pickup-preparation.service.js';
+import { preparePickup, pickupPreparationState, preparationIsFresh } from '../bookings/pickup-preparation.service.js';
+import { customerNoShowState, immediatePickupDueAt } from '../bookings/pickup-cancellation.policy.js';
+import { releaseDriverAfterPickupEnds } from '../bookings/release-driver.service.js';
+import { computeRoute } from '../maps/maps.service.js';
 
 const router = express.Router();
 const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.variantId
@@ -92,6 +95,7 @@ const toActiveTrip = (booking) => ({
   scheduledStartAt: booking.scheduledStartAt,
   timing: booking.timing,
   ...pickupPreparationState(booking, booking.currentDriverId),
+  ...customerNoShowState(booking),
   ...['PAYMENT_PENDING', 'COMPLETED'].includes(booking.status) ? {
     amount: booking.totalAmount,
     pricing: booking.pricingSnapshot,
@@ -170,6 +174,23 @@ router.patch('/location', validate(locationSchema), async (req, res, next) => {
     }
     req.driver.currentLocation = { ...req.validated.body, recordedAt };
     await req.driver.save();
+    if (req.driver.operationalStatus === 'ONLINE') {
+      const now = Date.now();
+      const scheduled = await Booking.findOne({
+        currentDriverId: req.driver._id,
+        timing: 'SCHEDULED',
+        status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED'] },
+        scheduledStartAt: { $gt: new Date(now), $lte: new Date(now + 3 * 60 * 60000) },
+      }).sort({ scheduledStartAt: 1 });
+      if (scheduled && !preparationIsFresh(scheduled.pickupPreparation, req.driver.id, now)) {
+        try {
+          await preparePickup(scheduled, req.driver, { ...req.validated.body, recordedAt });
+        } catch (error) {
+          // A route API outage must not discard an otherwise valid GPS update.
+          console.warn('Scheduled pickup ETA refresh postponed', { bookingId: scheduled.id, code: error.code || 'ROUTE_UNAVAILABLE' });
+        }
+      }
+    }
     return res.json({ success: true, data: { location: req.driver.currentLocation } });
   } catch (error) { return next(error); }
 });
@@ -240,7 +261,7 @@ router.post('/:bookingId/accept', validate(idSchema), async (req, res, next) => 
         rejectedDriverIds: { $ne: req.driver._id },
       },
       {
-        $set: { currentDriverId: req.driver._id, status: 'DRIVER_ACCEPTED' },
+        $set: { currentDriverId: req.driver._id, status: 'DRIVER_ACCEPTED', pickupDueAt: immediatePickupDueAt(new Date()) },
         $push: {
           assignments: {
             driverId: req.driver._id,
@@ -253,6 +274,19 @@ router.post('/:bookingId/accept', validate(idSchema), async (req, res, next) => 
       { new: true, runValidators: true },
     );
     if (!booking) throw new AppError(409, 'RIDE_ALREADY_TAKEN', 'Another driver accepted this ride');
+    const location = req.driver.currentLocation;
+    const age = Date.now() - new Date(location?.recordedAt).getTime();
+    if (Number.isFinite(location?.latitude) && Number.isFinite(location?.longitude) && age >= 0 && age <= 60000) {
+      try {
+        const route = await computeRoute({ origin: location, destination: booking.pickup });
+        await Booking.updateOne(
+          { _id: booking._id, currentDriverId: req.driver._id, status: 'DRIVER_ACCEPTED' },
+          { $set: { pickupDueAt: immediatePickupDueAt(booking.updatedAt, route.durationMinutes) } },
+        );
+      } catch (error) {
+        console.warn('Using 30-minute pickup cancellation fallback', { bookingId: booking.id, code: error.code || 'ROUTE_UNAVAILABLE' });
+      }
+    }
     return res.json({ success: true, data: { booking: toOffer(booking) } });
   } catch (error) { return next(error); }
 });
@@ -329,11 +363,36 @@ router.post('/:bookingId/arrive', validate(arriveSchema), async (req, res, next)
     if (distance > 200) {
       throw new AppError(409, 'TOO_FAR_FROM_PICKUP', `Move within 200 m of pickup before marking arrived (${Math.round(distance)} m away)`);
     }
-    booking.status = 'ARRIVED';
-    booking.arrivedAt = new Date();
-    booking.tripStartOtp = String(Math.floor(100000 + Math.random() * 900000));
-    booking.statusHistory.push({ status: 'ARRIVED', note: `Driver arrived ${Math.round(distance)} m from pickup; waiting timer started` });
-    await booking.save();
+    const arrived = await Booking.findOneAndUpdate(
+      { _id: booking._id, currentDriverId: req.driver._id, status: 'DRIVER_EN_ROUTE' },
+      { $set: { status: 'ARRIVED', arrivedAt: new Date(), tripStartOtp: String(Math.floor(100000 + Math.random() * 900000)) },
+        $push: { statusHistory: { status: 'ARRIVED', note: `Driver arrived ${Math.round(distance)} m from pickup; waiting timer started` } } },
+      { new: true, runValidators: true },
+    );
+    if (!arrived) throw new AppError(409, 'INVALID_TRIP_TRANSITION', 'The trip changed. Refresh and try again');
+    return res.json({ success: true, data: { trip: toActiveTrip(arrived) } });
+  } catch (error) { return next(error); }
+});
+
+router.post('/:bookingId/customer-no-show', validate(idSchema), async (req, res, next) => {
+  try {
+    const existing = await Booking.findOne({
+      _id: req.validated.params.bookingId,
+      currentDriverId: req.driver._id,
+      status: 'ARRIVED',
+    });
+    if (!existing || !customerNoShowState(existing).canMarkCustomerNoShow) {
+      throw new AppError(409, 'NO_SHOW_NOT_AVAILABLE', 'Customer no-show is available 10 minutes after verified arrival, before trip start');
+    }
+    const booking = await Booking.findOneAndUpdate(
+      { _id: existing._id, currentDriverId: req.driver._id, status: 'ARRIVED', arrivedAt: { $lte: new Date(Date.now() - 10 * 60000) } },
+      { $set: { status: 'NO_SHOW', cancellation: { actor: 'DRIVER', reason: 'CUSTOMER_NO_SHOW', at: new Date() } },
+        $unset: { tripStartOtp: '' },
+        $push: { statusHistory: { status: 'NO_SHOW', note: 'Driver marked customer no-show after verified arrival and 10-minute wait' } } },
+      { new: true, runValidators: true },
+    );
+    if (!booking) throw new AppError(409, 'NO_SHOW_NOT_AVAILABLE', 'The trip changed. Refresh and try again');
+    await releaseDriverAfterPickupEnds(req.driver._id);
     return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
   } catch (error) { return next(error); }
 });
@@ -345,13 +404,15 @@ router.post('/:bookingId/start', validate(startSchema), async (req, res, next) =
 
     if (booking.tripStartOtp !== req.validated.body.otp) throw new AppError(400, 'INVALID_TRIP_OTP', 'The trip OTP is incorrect');
 
-    booking.status = 'IN_PROGRESS';
-    booking.startedAt = new Date();
-    booking.tripStartOtp = undefined;
-    booking.statusHistory.push({ status: 'IN_PROGRESS', note: 'Trip started after OTP verification' });
-
-    await booking.save();
-    return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
+    const started = await Booking.findOneAndUpdate(
+      { _id: booking._id, currentDriverId: req.driver._id, status: 'ARRIVED', tripStartOtp: req.validated.body.otp },
+      { $set: { status: 'IN_PROGRESS', startedAt: new Date() },
+        $unset: { tripStartOtp: '' },
+        $push: { statusHistory: { status: 'IN_PROGRESS', note: 'Trip started after OTP verification' } } },
+      { new: true, runValidators: true },
+    );
+    if (!started) throw new AppError(409, 'INVALID_TRIP_TRANSITION', 'The trip changed. Refresh and try again');
+    return res.json({ success: true, data: { trip: toActiveTrip(started) } });
   } catch (error) { return next(error); }
 });
 

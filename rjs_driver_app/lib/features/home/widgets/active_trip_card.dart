@@ -9,12 +9,14 @@ class ActiveTripCard extends StatelessWidget {
     required this.busy,
     required this.onAction,
     this.onArrived,
+    this.onCustomerNoShow,
   });
 
   final Map<String, dynamic> trip;
   final bool busy;
   final VoidCallback onAction;
   final VoidCallback? onArrived;
+  final VoidCallback? onCustomerNoShow;
 
   String get status => trip['status']?.toString() ?? '';
 
@@ -268,6 +270,19 @@ class ActiveTripCard extends StatelessWidget {
                 onPressed: busy ? null : onArrived,
                 icon: const Icon(Icons.pin_drop_outlined),
                 label: const Text("I've Arrived"),
+              ),
+            ),
+          ],
+          if (status == 'ARRIVED' && onCustomerNoShow != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: busy || trip['canMarkCustomerNoShow'] != true ? null : onCustomerNoShow,
+                icon: const Icon(Icons.person_off_outlined),
+                label: Text(trip['canMarkCustomerNoShow'] == true
+                    ? 'Customer no-show'
+                    : 'No-show available 10 min after arrival'),
               ),
             ),
           ],

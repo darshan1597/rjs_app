@@ -4,9 +4,10 @@ import { vi } from 'vitest';
 vi.mock('../src/config/env.js', () => ({ env: { RAZORPAY_KEY_ID: 'test-key' } }));
 vi.mock('../src/modules/customers/customer-auth.middleware.js', () => ({ authenticateCustomer: (req, res, next) => { req.customer = { id: 'customer' }; next(); } }));
 vi.mock('../src/modules/wallets/wallet.model.js', () => ({
-  WalletTopup: { findOne: vi.fn(), updateOne: vi.fn() },
-  WalletLedger: {},
+  WalletTopup: { find: vi.fn(), findOne: vi.fn(), updateOne: vi.fn() },
+  WalletLedger: { find: vi.fn() },
   WalletEvent: { findOne: vi.fn(), findOneAndUpdate: vi.fn() },
+  WalletWithdrawal: { aggregate: vi.fn() },
 }));
 vi.mock('../src/modules/wallets/wallet.service.js', () => ({ ensureWallet: vi.fn(), creditTopup: vi.fn(), payRideWithWallet: vi.fn(), walletQuote: vi.fn() }));
 vi.mock('../src/modules/payments/razorpay.service.js', () => ({ createWalletOrder: vi.fn(), fetchPayment: vi.fn(), fetchOrderPayments: vi.fn(), verifyCheckoutSignature: vi.fn() }));
@@ -16,8 +17,8 @@ vi.mock('../src/modules/wallets/wallet-withdrawal.service.js', () => ({
 vi.mock('../src/modules/wallets/razorpayx.service.js', () => ({
   isPayoutConfigured: vi.fn().mockReturnValue(true), requirePayoutConfig: vi.fn(),
 }));
-import { WalletEvent, WalletTopup } from '../src/modules/wallets/wallet.model.js';
-import { creditTopup } from '../src/modules/wallets/wallet.service.js';
+import { WalletEvent, WalletLedger, WalletTopup, WalletWithdrawal } from '../src/modules/wallets/wallet.model.js';
+import { creditTopup, ensureWallet } from '../src/modules/wallets/wallet.service.js';
 import { fetchPayment, fetchOrderPayments, verifyCheckoutSignature } from '../src/modules/payments/razorpay.service.js';
 import { customerWalletRouter } from '../src/modules/wallets/wallet.routes.js';
 import { requestWithdrawal } from '../src/modules/wallets/wallet-withdrawal.service.js';
@@ -35,6 +36,22 @@ beforeEach(() => {
   verifyCheckoutSignature.mockReturnValue(true);
   fetchPayment.mockResolvedValue({ order_id: 'order_wallet' });
   creditTopup.mockResolvedValue(true);
+});
+it('returns live main, bonus, and held withdrawal balances', async () => {
+  ensureWallet.mockResolvedValue({ customerId: 'customer', balancePaise: 245000,
+    withdrawablePaise: 200000, restrictedPaise: 45000 });
+  WalletLedger.find.mockReturnValue({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) });
+  WalletTopup.find.mockReturnValue({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) });
+  WalletEvent.findOne.mockReturnValue({ sort: () => ({ lean: async () => null }) });
+  WalletWithdrawal.aggregate.mockResolvedValue([{ amountPaise: 15000 }]);
+  const response = await request(app).get('/wallet');
+  expect(response.status).toBe(200);
+  expect(response.body.data).toMatchObject({ balancePaise: 245000, withdrawablePaise: 200000,
+    restrictedPaise: 45000, lockedPaise: 15000 });
+  expect(WalletWithdrawal.aggregate).toHaveBeenCalledWith([
+    { $match: { customerId: 'customer', status: { $in: ['PENDING', 'PROCESSING'] } } },
+    { $group: { _id: null, amountPaise: { $sum: '$amountPaise' } } },
+  ]);
 });
 it('rejects access to another account’s top-up', async () => {
   WalletTopup.findOne.mockResolvedValue(null);

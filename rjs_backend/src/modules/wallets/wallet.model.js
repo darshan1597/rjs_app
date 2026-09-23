@@ -86,4 +86,5 @@ const walletWithdrawalSchema = new mongoose.Schema({
   completedAt: Date,
 }, { timestamps: true });
 walletWithdrawalSchema.index({ customerId: 1, idempotencyKey: 1 }, { unique: true });
+walletWithdrawalSchema.index({ customerId: 1, status: 1 });
 export const WalletWithdrawal = mongoose.model('WalletWithdrawal', walletWithdrawalSchema);

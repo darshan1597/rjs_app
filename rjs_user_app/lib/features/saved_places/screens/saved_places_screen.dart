@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../../core/config/google_maps_config.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/notification_popup.dart';
+import '../../location/models/map_place.dart';
+import '../../location/screens/location_search_screen.dart';
 import '../services/saved_places_service.dart';
 
-Future<bool?> showQuickPlaceSheet(
+enum QuickPlaceSheetResult { saved, book }
+
+Future<QuickPlaceSheetResult?> showQuickPlaceSheet(
   BuildContext context, {
   required String type,
   Map<String, dynamic>? address,
-}) => showModalBottomSheet<bool>(
+}) => showModalBottomSheet<QuickPlaceSheetResult>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
@@ -17,14 +23,104 @@ Future<bool?> showQuickPlaceSheet(
   builder: (_) => _QuickPlaceSheet(type: type, address: address),
 );
 
-Future<bool?> showFavoritePlacesSheet(BuildContext context) =>
-    showModalBottomSheet<bool>(
+Future<Object?> showFavoritePlacesSheet(BuildContext context) =>
+    showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const _FavoritePlacesSheet(),
     );
+
+Future<bool> _confirmRemovePlace(
+  BuildContext context, {
+  required String label,
+  required bool isFavorite,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.white,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF0E8),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppColors.orange,
+                size: 25,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              isFavorite ? 'Remove favorite?' : 'Remove saved place?',
+              style: const TextStyle(
+                color: AppColors.navy,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Remove $label from your ${isFavorite ? 'favorites' : 'saved places'}?',
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.navy,
+                      side: const BorderSide(color: Color(0xFFD8DDE7)),
+                      minimumSize: const Size.fromHeight(46),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Keep'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.orange,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(46),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Remove'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  return confirmed == true;
+}
 
 class _SheetHandle extends StatelessWidget {
   const _SheetHandle();
@@ -56,16 +152,52 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
   late final TextEditingController _address;
   late final TextEditingController _label;
   bool _saving = false;
+  late bool _editing;
+  MapPlace? _selectedPlace;
+  String? _error;
 
   String get _name => widget.type == 'HOME' ? 'Home' : 'Work';
 
   @override
   void initState() {
     super.initState();
+    _editing = widget.address == null;
     _address = TextEditingController(
       text: widget.address?['addressLine'] as String? ?? '',
     );
     _label = TextEditingController(text: _name);
+    final location = widget.address?['location'];
+    if (location is Map &&
+        location['latitude'] is num &&
+        location['longitude'] is num) {
+      _selectedPlace = MapPlace(
+        address: _address.text,
+        latitude: (location['latitude'] as num).toDouble(),
+        longitude: (location['longitude'] as num).toDouble(),
+      );
+    }
+  }
+
+  Future<void> _pickPlace({bool mapFirst = false}) async {
+    final selected = await Navigator.push<MapPlace>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationSearchScreen(
+          initialValue: _address.text,
+          initialPlace: _selectedPlace,
+          title: 'Choose $_name Location',
+          searchHint: 'Search your ${_name.toLowerCase()} location',
+          startOnMap: mapFirst,
+        ),
+      ),
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        _selectedPlace = selected;
+        _address.text = selected.address;
+        _error = null;
+      });
+    }
   }
 
   @override
@@ -76,13 +208,16 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
   }
 
   Future<void> _save() async {
-    if (_address.text.trim().length < 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter your complete address')),
+    if (_address.text.trim().length < 5 || _selectedPlace == null) {
+      setState(
+        () => _error = 'Select your $_name location from search or the map.',
       );
       return;
     }
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
       await SavedPlacesService.save(
         id: widget.address?['id'] as String?,
@@ -92,14 +227,14 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
         landmark: widget.address?['landmark'] as String? ?? '',
         city: widget.address?['city'] as String? ?? 'Bengaluru',
         pincode: widget.address?['pincode'] as String? ?? '',
+        latitude: _selectedPlace!.latitude,
+        longitude: _selectedPlace!.longitude,
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, QuickPlaceSheetResult.saved);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.toString().replaceFirst('Exception: ', '')),
-          ),
+        setState(
+          () => _error = error.toString().replaceFirst('Exception: ', ''),
         );
       }
     } finally {
@@ -107,17 +242,32 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) => Container(
+  void _backToSaved() {
+    final saved = widget.address;
+    if (saved == null) return;
+    final location = saved['location'];
+    setState(() {
+      _address.text = saved['addressLine']?.toString() ?? '';
+      _selectedPlace =
+          location is Map &&
+              location['latitude'] is num &&
+              location['longitude'] is num
+          ? MapPlace(
+              address: _address.text,
+              latitude: (location['latitude'] as num).toDouble(),
+              longitude: (location['longitude'] as num).toDouble(),
+            )
+          : null;
+      _error = null;
+      _editing = false;
+    });
+  }
+
+  Widget _savedDetails(BuildContext context) => Container(
     constraints: BoxConstraints(
       maxHeight: MediaQuery.sizeOf(context).height * .78,
     ),
-    padding: EdgeInsets.fromLTRB(
-      20,
-      0,
-      20,
-      22 + MediaQuery.viewInsetsOf(context).bottom,
-    ),
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
     decoration: const BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -128,7 +278,7 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
         children: [
           const _SheetHandle(),
           Text(
-            '${widget.address == null ? 'Add' : 'Edit'} $_name Location',
+            'Saved $_name Location',
             style: const TextStyle(
               color: AppColors.navy,
               fontSize: 24,
@@ -136,66 +286,165 @@ class _QuickPlaceSheetState extends State<_QuickPlaceSheet> {
             ),
           ),
           const SizedBox(height: 5),
-          Text(
-            'Save your ${_name.toLowerCase()} location for faster bookings',
-            style: const TextStyle(color: AppColors.muted, fontSize: 14),
+          const Text(
+            'Your saved destination for quick bookings',
+            style: TextStyle(color: AppColors.muted, fontSize: 13),
           ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _address,
-            onChanged: (_) => setState(() {}),
-            decoration: _sheetInput(
-              'Search or enter your ${_name.toLowerCase()} address',
-              Icons.location_on_outlined,
-              locate: true,
-              context: context,
-            ),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _MapPreview(
-            title: _address.text.trim().isEmpty
-                ? 'Select your location'
-                : _address.text.trim(),
+            title: _address.text,
             icon: widget.type == 'HOME'
                 ? Icons.home_rounded
                 : Icons.work_rounded,
+            place: _selectedPlace,
+            onChange: () => setState(() => _editing = true),
           ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _label,
-            readOnly: true,
-            decoration: _sheetInput(
-              'Add a label',
-              widget.type == 'HOME'
-                  ? Icons.home_outlined
-                  : Icons.work_outline_rounded,
+          const SizedBox(height: 12),
+          Text(
+            _address.text,
+            style: const TextStyle(
+              color: AppColors.navy,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 55,
-            child: FilledButton(
-              onPressed: _saving ? null : _save,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.orange,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() => _editing = true),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit Location'),
                 ),
               ),
-              child: Text(
-                _saving ? 'Saving...' : 'Save Location',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.pop(context, QuickPlaceSheetResult.book),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.orange,
+                  ),
+                  icon: const Icon(Icons.directions_car_rounded, size: 18),
+                  label: const Text('Book Ride'),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
     ),
   );
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_editing) return _savedDetails(context);
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .78,
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        0,
+        20,
+        22 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SheetHandle(),
+            Text(
+              '${widget.address == null ? 'Add' : 'Edit'} $_name Location',
+              style: const TextStyle(
+                color: AppColors.navy,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'Save your ${_name.toLowerCase()} location for faster bookings',
+              style: const TextStyle(color: AppColors.muted, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _address,
+              readOnly: true,
+              onTap: () => _pickPlace(),
+              decoration: _sheetInput(
+                'Tap to choose your ${_name.toLowerCase()} location',
+                Icons.location_on_outlined,
+                onLocate: () => _pickPlace(mapFirst: true),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _MapPreview(
+              title: _address.text.trim().isEmpty
+                  ? 'Select your location'
+                  : _address.text.trim(),
+              place: _selectedPlace,
+              onChange: () => _pickPlace(mapFirst: true),
+              icon: widget.type == 'HOME'
+                  ? Icons.home_rounded
+                  : Icons.work_rounded,
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _label,
+              readOnly: true,
+              decoration: _sheetInput(
+                'Add a label',
+                widget.type == 'HOME'
+                    ? Icons.home_outlined
+                    : Icons.work_outline_rounded,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_error != null) ...[
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12.5),
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (widget.address != null) ...[
+              TextButton(
+                onPressed: _backToSaved,
+                child: const Text('Back to saved location'),
+              ),
+              const SizedBox(height: 4),
+            ],
+            SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: FilledButton(
+                onPressed: _saving ? null : _save,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.orange,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  _saving ? 'Saving...' : 'Save Location',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _FavoritePlacesSheet extends StatefulWidget {
@@ -210,6 +459,7 @@ class _FavoritePlacesSheetState extends State<_FavoritePlacesSheet> {
   late final TextEditingController _search;
   bool _changed = false;
   String _query = '';
+  String? _error;
 
   @override
   void initState() {
@@ -242,124 +492,151 @@ class _FavoritePlacesSheetState extends State<_FavoritePlacesSheet> {
     }
   }
 
-  Future<void> _delete(String id) async {
-    await SavedPlacesService.delete(id);
-    if (mounted) {
-      setState(() {
-        _changed = true;
-        _reload();
-      });
+  Future<void> _delete(Map<String, dynamic> place) async {
+    final confirmed = await _confirmRemovePlace(
+      context,
+      label: '${place['label'] ?? 'this place'}',
+      isFavorite: true,
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await SavedPlacesService.delete(place['id'] as String);
+      if (mounted) {
+        setState(() {
+          _error = null;
+          _changed = true;
+          _reload();
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = error.toString().replaceFirst('Exception: ', ''),
+        );
+      }
     }
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: false,
-    onPopInvokedWithResult: (didPop, result) {
-      if (!didPop) Navigator.pop(context, _changed);
-    },
-    child: Container(
-      height: MediaQuery.sizeOf(context).height * .72,
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Favorite Places',
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
+  Widget build(BuildContext context) => Container(
+    height: MediaQuery.sizeOf(context).height * .72,
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SheetHandle(),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Favorite Places',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              IconButton(
-                onPressed: () => Navigator.pop(context, _changed),
-                icon: const Icon(Icons.close_rounded, size: 29),
-              ),
-            ],
-          ),
-          const Text(
-            'Save your frequently visited locations for faster bookings',
-            style: TextStyle(color: AppColors.muted, fontSize: 13.5),
-          ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: _search,
-            onChanged: (value) => setState(() => _query = value.trim()),
-            decoration: InputDecoration(
-              hintText: 'Search saved favorites',
-              hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: AppColors.navy,
-              ),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      onPressed: () {
-                        _search.clear();
-                        setState(() => _query = '');
-                      },
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFDDE3EC)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFDDE3EC)),
-              ),
+            ),
+            IconButton(
+              onPressed: () => Navigator.pop(context, _changed),
+              icon: const Icon(Icons.close_rounded, size: 29),
+            ),
+          ],
+        ),
+        const Text(
+          'Tap a place to book a ride. Use the icons to edit or remove it.',
+          style: TextStyle(color: AppColors.muted, fontSize: 13.5),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12),
             ),
           ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: FutureBuilder<List<Map<String, dynamic>>>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: AppColors.orange),
-                  );
-                }
-                final favorites = (snapshot.data ?? [])
-                    .where((place) => place['type'] == 'FAVORITE')
-                    .where((place) {
-                      if (_query.isEmpty) return true;
-                      final searchable =
-                          '${place['label']} ${place['addressLine']}'
-                              .toLowerCase();
-                      return searchable.contains(_query.toLowerCase());
-                    })
-                    .toList();
-                if (favorites.isEmpty) {
-                  return Center(
-                    child: Text(
-                      _query.isEmpty
-                          ? 'No favorite places added yet'
-                          : 'No favorites match “$_query”',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppColors.muted),
-                    ),
-                  );
-                }
-                return ListView.separated(
-                  itemCount: favorites.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final place = favorites[index];
-                    return Container(
+        const SizedBox(height: 18),
+        TextField(
+          controller: _search,
+          onChanged: (value) => setState(() => _query = value.trim()),
+          decoration: InputDecoration(
+            hintText: 'Search saved favorites',
+            hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
+            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.navy),
+            suffixIcon: _query.isEmpty
+                ? null
+                : IconButton(
+                    onPressed: () {
+                      _search.clear();
+                      setState(() => _query = '');
+                    },
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDDE3EC)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFDDE3EC)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: AppColors.orange),
+                );
+              }
+              if (snapshot.hasError) {
+                return const Center(
+                  child: Text(
+                    'Could not load favorites. Close and try again.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted),
+                  ),
+                );
+              }
+              final favorites = (snapshot.data ?? [])
+                  .where((place) => place['type'] == 'FAVORITE')
+                  .where((place) {
+                    if (_query.isEmpty) return true;
+                    final searchable =
+                        '${place['label']} ${place['addressLine']}'
+                            .toLowerCase();
+                    return searchable.contains(_query.toLowerCase());
+                  })
+                  .toList();
+              if (favorites.isEmpty) {
+                return Center(
+                  child: Text(
+                    _query.isEmpty
+                        ? 'No favorite places added yet'
+                        : 'No favorites match “$_query”',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
+                );
+              }
+              return ListView.separated(
+                itemCount: favorites.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final place = favorites[index];
+                  return InkWell(
+                    onTap: () => Navigator.pop(context, place),
+                    borderRadius: BorderRadius.circular(15),
+                    child: Container(
                       padding: const EdgeInsets.all(13),
                       decoration: BoxDecoration(
                         border: Border.all(color: const Color(0xFFE1E5EC)),
@@ -410,7 +687,7 @@ class _FavoritePlacesSheetState extends State<_FavoritePlacesSheet> {
                             ),
                           ),
                           IconButton(
-                            onPressed: () => _delete(place['id'] as String),
+                            onPressed: () => _delete(place),
                             icon: const Icon(
                               Icons.delete_outline_rounded,
                               color: Colors.red,
@@ -418,33 +695,48 @@ class _FavoritePlacesSheetState extends State<_FavoritePlacesSheet> {
                           ),
                         ],
                       ),
-                    );
-                  },
-                );
-              },
-            ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 55,
-            child: FilledButton.icon(
-              onPressed: _openEditor,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.orange,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+        ),
+        const SizedBox(height: 12),
+        FutureBuilder<List<Map<String, dynamic>>>(
+          future: _future,
+          builder: (context, snapshot) {
+            final count = (snapshot.data ?? [])
+                .where((place) => place['type'] == 'FAVORITE')
+                .length;
+            final canAdd = snapshot.hasData && count < 5;
+            return SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: FilledButton.icon(
+                onPressed: canAdd ? () => _openEditor() : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.orange,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: Icon(
+                  canAdd ? Icons.add_rounded : Icons.star_rounded,
+                  size: 24,
+                ),
+                label: Text(
+                  count >= 5 ? '5/5 Favorites Saved' : 'Add New Favorite',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-              icon: const Icon(Icons.add_rounded, size: 26),
-              label: const Text(
-                'Add New Favorite',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        ),
+      ],
     ),
   );
 }
@@ -452,20 +744,14 @@ class _FavoritePlacesSheetState extends State<_FavoritePlacesSheet> {
 InputDecoration _sheetInput(
   String hint,
   IconData icon, {
-  bool locate = false,
-  BuildContext? context,
+  VoidCallback? onLocate,
 }) => InputDecoration(
   hintText: hint,
   hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
   prefixIcon: Icon(icon, color: AppColors.navy),
-  suffixIcon: locate
+  suffixIcon: onLocate != null
       ? IconButton(
-          onPressed: () => ScaffoldMessenger.of(context!).showSnackBar(
-            const SnackBar(
-              content: Text('Live map selection will be connected later.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          ),
+          onPressed: onLocate,
           icon: const Icon(Icons.my_location_rounded, color: AppColors.blue),
         )
       : null,
@@ -482,65 +768,106 @@ InputDecoration _sheetInput(
 );
 
 class _MapPreview extends StatelessWidget {
-  const _MapPreview({required this.title, required this.icon});
+  const _MapPreview({
+    required this.title,
+    required this.icon,
+    required this.place,
+    required this.onChange,
+  });
   final String title;
   final IconData icon;
+  final MapPlace? place;
+  final VoidCallback onChange;
 
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(15),
     child: SizedBox(
-      height: 155,
+      height: 175,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset(
-            'assets/images/home-map-placeholder.png',
-            fit: BoxFit.cover,
-          ),
-          const Center(
-            child: Icon(
-              Icons.location_on_rounded,
-              color: AppColors.orange,
-              size: 46,
+          if (place == null)
+            Container(
+              color: const Color(0xFFF1F6FF),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.map_outlined, color: AppColors.blue, size: 34),
+                  SizedBox(height: 5),
+                  Text(
+                    'Choose a location to preview it on the map',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            )
+          else
+            IgnorePointer(
+              child: GoogleMap(
+                key: ValueKey('${place!.latitude},${place!.longitude}'),
+                mapId: GoogleMapsConfig.mapId,
+                initialCameraPosition: CameraPosition(
+                  target: LatLng(place!.latitude, place!.longitude),
+                  zoom: 16,
+                ),
+                markers: {
+                  Marker(
+                    markerId: const MarkerId('saved-place'),
+                    position: LatLng(place!.latitude, place!.longitude),
+                  ),
+                },
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+              ),
             ),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(onTap: onChange),
           ),
           Positioned(
             left: 14,
             right: 14,
             bottom: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(13),
+              elevation: 3,
+              child: InkWell(
+                onTap: onChange,
                 borderRadius: BorderRadius.circular(13),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x190A244A), blurRadius: 12),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Icon(icon, color: AppColors.orange),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(icon, color: AppColors.orange),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.navy,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                    ),
+                      Text(
+                        place == null ? 'Choose' : 'Change',
+                        style: const TextStyle(
+                          color: AppColors.blue,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
-                  const Text(
-                    'Change',
-                    style: TextStyle(
-                      color: AppColors.blue,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -605,33 +932,12 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> address) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Remove saved place?',
-          style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800),
-        ),
-        content: Text(
-          'Remove ${address['label'] ?? address['type']} from your saved places?',
-          style: const TextStyle(color: AppColors.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await _confirmRemovePlace(
+      context,
+      label: '${address['label'] ?? address['type']}',
+      isFavorite: address['type'] == 'FAVORITE',
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     await SavedPlacesService.delete(address['id'] as String);
     await _load();
   }
@@ -704,9 +1010,14 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: () => _openEditor('FAVORITE'),
+                    onPressed:
+                        _loading || _error != null || favorites.length >= 5
+                        ? null
+                        : () => _openEditor('FAVORITE'),
                     icon: const Icon(Icons.add_rounded, size: 19),
-                    label: const Text('Add Place'),
+                    label: Text(
+                      favorites.length >= 5 ? '5/5 Saved' : 'Add Place',
+                    ),
                   ),
                 ],
               ),
@@ -1064,6 +1375,7 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
   late final TextEditingController _pincode;
   bool _saving = false;
   String? _error;
+  MapPlace? _selectedPlace;
 
   @override
   void initState() {
@@ -1082,6 +1394,42 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
       text: value?['city'] as String? ?? 'Bengaluru',
     );
     _pincode = TextEditingController(text: value?['pincode'] as String? ?? '');
+    final location = value?['location'];
+    if (location is Map &&
+        location['latitude'] is num &&
+        location['longitude'] is num) {
+      _selectedPlace = MapPlace(
+        address: _address.text,
+        latitude: (location['latitude'] as num).toDouble(),
+        longitude: (location['longitude'] as num).toDouble(),
+      );
+    }
+  }
+
+  Future<void> _pickPlace({bool mapFirst = false}) async {
+    final selected = await Navigator.push<MapPlace>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationSearchScreen(
+          initialValue: _address.text,
+          initialPlace: _selectedPlace,
+          title:
+              'Choose ${widget.type == 'HOME'
+                  ? 'Home'
+                  : widget.type == 'WORK'
+                  ? 'Work'
+                  : 'Favorite'} Location',
+          searchHint: 'Search a location',
+          startOnMap: mapFirst,
+        ),
+      ),
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        _selectedPlace = selected;
+        _address.text = selected.address;
+      });
+    }
   }
 
   String get _defaultLabel => switch (widget.type) {
@@ -1102,9 +1450,12 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
 
   Future<void> _save() async {
     if (_address.text.trim().length < 5 ||
+        _selectedPlace == null ||
         _city.text.trim().length < 2 ||
         (widget.type == 'FAVORITE' && _label.text.trim().isEmpty)) {
-      setState(() => _error = 'Enter a label, complete address and city');
+      setState(
+        () => _error = 'Select a real location, then enter a label and city',
+      );
       return;
     }
     if (_pincode.text.isNotEmpty &&
@@ -1125,6 +1476,8 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
         landmark: _landmark.text.trim(),
         city: _city.text.trim(),
         pincode: _pincode.text.trim(),
+        latitude: _selectedPlace!.latitude,
+        longitude: _selectedPlace!.longitude,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
@@ -1176,14 +1529,14 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
           children: [
             TextField(
               controller: _address,
-              onChanged: (_) => setState(() {}),
+              readOnly: true,
+              onTap: () => _pickPlace(),
               maxLines: 1,
               textCapitalization: TextCapitalization.sentences,
               decoration: _sheetInput(
-                'Search or enter an address',
+                'Tap to choose a location',
                 Icons.search_rounded,
-                locate: true,
-                context: context,
+                onLocate: () => _pickPlace(mapFirst: true),
               ),
             ),
             const SizedBox(height: 16),
@@ -1192,6 +1545,8 @@ class _SavedPlaceEditorScreenState extends State<SavedPlaceEditorScreen> {
                   ? 'Selected Location'
                   : _address.text.trim(),
               icon: Icons.location_on_rounded,
+              place: _selectedPlace,
+              onChange: () => _pickPlace(mapFirst: true),
             ),
             const SizedBox(height: 24),
             const _EditorHeading(

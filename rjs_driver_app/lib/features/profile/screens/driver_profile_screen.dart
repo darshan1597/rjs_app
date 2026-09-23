@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/network/driver_api_service.dart';
+import '../../../core/notifications/driver_push_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
 import '../../../shared/widgets/driver_header_actions.dart';
@@ -68,6 +69,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       } catch (_) {
         // Logout must still succeed if the server cannot be reached.
       }
+      await DriverPushService.unregisterCurrentDevice();
       await DriverApiService.clearSession();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(

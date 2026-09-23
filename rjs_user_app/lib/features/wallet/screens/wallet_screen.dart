@@ -33,14 +33,6 @@ class WalletDesign extends StatelessWidget {
     (wallet?['transactions'] as List? ?? []).cast<Map<String, dynamic>>();
   List<Map<String, dynamic>> get withdrawals =>
     (wallet?['withdrawals'] as List? ?? []).cast<Map<String, dynamic>>();
-  void _offers(BuildContext context) => showModalBottomSheet<void>(
-    context: context, isScrollControlled: true, showDragHandle: true,
-    builder: (sheetContext) => SafeArea(child: Padding(padding: const EdgeInsets.all(16),
-      child: _OffersPanel(discount: discount, onAddMoney: paying || wallet == null ? null : () {
-        Navigator.pop(sheetContext);
-        onAddMoney();
-      }))),
-  );
   void _history(BuildContext context) => showModalBottomSheet<void>(
     context: context, isScrollControlled: true, showDragHandle: true,
     builder: (_) => SafeArea(child: SizedBox(height: MediaQuery.sizeOf(context).height * .7,
@@ -79,13 +71,16 @@ class WalletDesign extends StatelessWidget {
                 _BalanceCard(
                   showBalance: showBalance,
                   balancePaise: wallet?['balancePaise'] as num?,
+                  mainPaise: wallet?['withdrawablePaise'] as num?,
+                  bonusPaise: wallet?['restrictedPaise'] as num?,
+                  lockedPaise: wallet?['lockedPaise'] as num?,
                   onToggle: onToggle,
                   onAddMoney: paying || wallet == null ? null : onAddMoney,
                   onWithdraw: paying || wallet == null || wallet?['withdrawalEnabled'] != true || (wallet?['withdrawablePaise'] as num? ?? 0) < 10000 ? null : onWithdraw,
                   paying: paying,
                 ),
                 const SizedBox(height: 10),
-                _WalletPromo(discount: discount, onOffers: () => _offers(context)),
+                _WalletPromo(discount: discount),
                 if (withdrawals.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   _WithdrawalStatus(item: withdrawals.first),
@@ -99,11 +94,6 @@ class WalletDesign extends StatelessWidget {
                 const SizedBox(height: 10),
                 _RecentTransactions(transactions: transactions.take(5).toList(),
                   loading: wallet == null, onViewAll: () => _history(context)),
-                const SizedBox(height: 10),
-                _OffersPanel(discount: discount, onAddMoney: paying || wallet == null ? null : onAddMoney),
-                const SizedBox(height: 10),
-                const Text('Real-money balance can be withdrawn. Wallet credits are available only for RJS rides.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 10)),
               ],
             ),
           ),
@@ -202,13 +192,16 @@ class _WalletHeaderButton extends StatelessWidget {
 
 class _BalanceCard extends StatelessWidget {
   const _BalanceCard({required this.showBalance, required this.onToggle,
-    required this.balancePaise, required this.onAddMoney, required this.onWithdraw, required this.paying});
+    required this.balancePaise, required this.mainPaise, required this.bonusPaise,
+    required this.lockedPaise, required this.onAddMoney, required this.onWithdraw, required this.paying});
   final bool showBalance;
   final VoidCallback onToggle;
-  final num? balancePaise;
+  final num? balancePaise, mainPaise, bonusPaise, lockedPaise;
   final VoidCallback? onAddMoney;
   final VoidCallback? onWithdraw;
   final bool paying;
+
+  String _displayAmount(num? amount) => amount == null ? '—' : showBalance ? _walletMoney(amount) : '₹ ••••';
 
   @override
   Widget build(BuildContext context) => Container(
@@ -349,8 +342,116 @@ class _BalanceCard extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 15),
+        Divider(color: Colors.white.withValues(alpha: .26), height: 1),
+        const SizedBox(height: 13),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _BalancePart(amount: _displayAmount(mainPaise), label: 'Main Balance',
+              icon: Icons.account_balance_wallet_outlined,
+              description: 'Money you added to your wallet, plus eligible ride refunds.',
+              usage: 'Use it for RJS rides or request a withdrawal to your UPI ID.')),
+            _balanceDivider(),
+            Expanded(child: _BalancePart(amount: _displayAmount(bonusPaise), label: 'Bonus Balance',
+              icon: Icons.card_giftcard_outlined,
+              description: 'Credits added to your wallet by RJS, including goodwill or promotional credits.',
+              usage: 'Use it for RJS rides. Bonus Balance cannot be withdrawn.')),
+            _balanceDivider(),
+            Expanded(child: _BalancePart(amount: _displayAmount(lockedPaise), label: 'Locked Balance',
+              icon: Icons.lock_clock_outlined,
+              description: 'Money reserved while a withdrawal request is pending or processing.',
+              usage: 'It is not included in Total Balance. If the withdrawal fails or is rejected, it returns to Main Balance.')),
+          ],
+        ),
       ],
     ),
+  );
+
+  Widget _balanceDivider() => Container(
+    width: 1,
+    height: 52,
+    margin: const EdgeInsets.symmetric(horizontal: 8),
+    color: Colors.white.withValues(alpha: .25),
+  );
+}
+
+class _BalancePart extends StatelessWidget {
+  const _BalancePart({required this.amount, required this.label, required this.icon,
+    required this.description, required this.usage});
+  final String amount, label, description, usage;
+  final IconData icon;
+
+  void _showDetails(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (sheetContext) => SafeArea(
+      top: false,
+      child: SingleChildScrollView(child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(color: const Color(0xFFEAF2FF), borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: AppColors.blue, size: 23),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(label, style: const TextStyle(
+              color: AppColors.navy, fontSize: 19, fontWeight: FontWeight.w800))),
+            IconButton(
+              tooltip: 'Close',
+              onPressed: () => Navigator.pop(sheetContext),
+              icon: const Icon(Icons.close_rounded, color: AppColors.muted),
+            ),
+          ]),
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(color: const Color(0xFFF3F7FF), borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Current balance', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text(amount, style: const TextStyle(color: AppColors.navy, fontSize: 25, fontWeight: FontWeight.w800)),
+            ]),
+          ),
+          const SizedBox(height: 18),
+          Text(description, style: const TextStyle(color: AppColors.navy, fontSize: 14, height: 1.5)),
+          const SizedBox(height: 10),
+          Text(usage, style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5)),
+        ]),
+      )),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(amount, maxLines: 1, style: const TextStyle(
+          color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800,
+        )),
+      ),
+      const SizedBox(height: 5),
+      Row(children: [
+        Flexible(child: Text(label, maxLines: 2, style: const TextStyle(color: Colors.white, fontSize: 10))),
+        const SizedBox(width: 2),
+        IconButton(
+          onPressed: () => _showDetails(context),
+          tooltip: 'About $label',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+          icon: const Icon(Icons.info_outline_rounded, color: Colors.white70, size: 17),
+        ),
+      ]),
+    ],
   );
 }
 
@@ -376,47 +477,38 @@ class _WithdrawalStatus extends StatelessWidget {
 }
 
 class _WalletPromo extends StatelessWidget {
-  const _WalletPromo({required this.discount, required this.onOffers});
+  const _WalletPromo({required this.discount});
   final int discount;
-  final VoidCallback onOffers;
   @override
-  Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 430;
-    final button = OutlinedButton.icon(
-      onPressed: onOffers,
-      icon: const Icon(Icons.sell_outlined, size: 15),
-      label: const Text('View Offers'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.blue,
-        side: const BorderSide(color: AppColors.blue),
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        textStyle: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700),
-      ),
-    );
-    return Container(
-      constraints: const BoxConstraints(minHeight: 94),
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 0),
+  Widget build(BuildContext context) => Container(
+      constraints: const BoxConstraints(minHeight: 88),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(color: const Color(0xFFF2F7FF), borderRadius: BorderRadius.circular(12)),
       child: Row(children: [
-        Image.asset('assets/images/wallet-promo-transparent.png', width: 88, height: 76, fit: BoxFit.contain),
+        Image.asset('assets/images/wallet-promo-transparent.png', width: 72, height: 66, fit: BoxFit.contain),
         const SizedBox(width: 10),
         Expanded(child: Column(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Use Wallet for faster payments',
-              style: TextStyle(color: AppColors.navy, fontSize: 12, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 5),
-            Text('Save $discount% when you pay\nfor a ride with your wallet',
-              style: const TextStyle(color: AppColors.muted, fontSize: 10, height: 1.45)),
-            if (compact) button,
+            Row(children: [
+              const Expanded(child: Text('Wallet ride discount',
+                style: TextStyle(color: AppColors.navy, fontSize: 12, fontWeight: FontWeight.w800))),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(color: const Color(0xFFDDEBFF), borderRadius: BorderRadius.circular(6)),
+                child: Text('$discount% OFF', style: const TextStyle(
+                  color: AppColors.blue, fontSize: 10, fontWeight: FontWeight.w800)),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            const Text('Automatically applied to your final ride bill when you pay with your wallet.',
+              style: TextStyle(color: AppColors.muted, fontSize: 10, height: 1.4)),
           ],
         )),
-        if (!compact) button,
       ]),
     );
-  }
 }
 
 class _RecentTransactions extends StatelessWidget {
@@ -554,77 +646,6 @@ class _RecentTransactions extends StatelessWidget {
   );
 }
 
-class _OffersPanel extends StatelessWidget {
-  const _OffersPanel({required this.discount, required this.onAddMoney});
-  final int discount;
-  final VoidCallback? onAddMoney;
-  @override
-  Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 430;
-    final button = OutlinedButton(
-      onPressed: onAddMoney,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFFF8A00),
-        side: const BorderSide(color: Color(0xFFFF9A00)),
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        textStyle: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700),
-      ),
-      child: const Text('Add Money Now'),
-    );
-    return _Panel(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _Title('Offers & Benefits'),
-        const SizedBox(height: 9),
-        Container(
-          constraints: const BoxConstraints(minHeight: 78),
-          padding: EdgeInsets.symmetric(horizontal: 10, vertical: compact ? 8 : 0),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Color(0xFFFFF4DA), Color(0xFFFFFAEC)]),
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Row(children: [
-            Image.asset('assets/images/wallet-offer-gift-transparent.png', width: 90, height: 72, fit: BoxFit.contain),
-            const SizedBox(width: 8),
-            Expanded(child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Save $discount% with Wallet',
-                  style: const TextStyle(color: Color(0xFF3A210C), fontSize: 12, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 3),
-                Text('Pay for your completed ride with\nwallet and get $discount% off the final bill',
-                  style: const TextStyle(color: Color(0xFF5E402A), fontSize: 9, height: 1.35)),
-                if (compact) button,
-              ],
-            )),
-            if (!compact) button,
-          ]),
-        ),
-        const SizedBox(height: 8),
-        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _Dot(true), SizedBox(width: 6), _Dot(false), SizedBox(width: 6),
-          _Dot(false), SizedBox(width: 6), _Dot(false),
-        ]),
-      ],
-    ));
-  }
-}
-
-class _Dot extends StatelessWidget {
-  const _Dot(this.active);
-  final bool active;
-  @override
-  Widget build(BuildContext context) => Container(
-    width: active ? 11 : 7,
-    height: 5,
-    decoration: BoxDecoration(
-      color: active ? const Color(0xFFFFA000) : const Color(0xFFE1E5EB),
-      borderRadius: BorderRadius.circular(4),
-    ),
-  );
-}
 
 class _Panel extends StatelessWidget {
   const _Panel({required this.child, this.padding = const EdgeInsets.all(12)});

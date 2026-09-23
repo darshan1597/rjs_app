@@ -11,6 +11,7 @@ import '../../location/models/map_place.dart';
 import '../../location/services/maps_service.dart';
 import '../services/customer_booking_service.dart';
 import '../../wallet/services/wallet_service.dart';
+import '../../bookings/widgets/late_pickup_cancel_dialog.dart';
 
 Widget _vehicleImage(String source) => source.startsWith('http')
     ? Image.network(
@@ -157,8 +158,15 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
           _searchProgress.stop();
           _messageTimer?.cancel();
         }
-        if (const {'COMPLETED', 'CANCELLED', 'NO_DRIVER_AVAILABLE'}.contains(status)) {
+        if (const {'COMPLETED', 'CANCELLED', 'NO_DRIVER_AVAILABLE', 'NO_SHOW'}.contains(status)) {
           _poller?.cancel();
+        }
+        if (status == 'NO_SHOW') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Driver reported customer no-show. Contact RJS support if this is incorrect.')));
+            Navigator.of(context).pop();
+          });
         }
       }
     } catch (_) {
@@ -319,6 +327,13 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   }
 
   Future<void> _cancel() async {
+    final isConfirmed = const {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(_status);
+    String? reason;
+    if (isConfirmed) {
+      if (_booking['canCancelLatePickup'] != true) return;
+      reason = await chooseLatePickupCancelReason(context);
+      if (reason == null) return;
+    } else {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -346,10 +361,17 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
       ),
     );
     if (confirmed != true) return;
+    }
+    if (!mounted) return;
     setState(() => _cancelling = true);
     try {
-      await CustomerBookingService.cancel(_bookingId);
-      if (mounted) Navigator.pop(context);
+      final cancelled = await CustomerBookingService.cancel(_bookingId, reason: reason);
+      if (mounted) {
+        setState(() => _booking = cancelled);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.of(context).pop();
+        });
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -481,9 +503,9 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
         ? LatLng((driverLocation!['latitude'] as num).toDouble(), (driverLocation['longitude'] as num).toDouble())
         : null;
     return PopScope(
-      canPop: _accepted,
+      canPop: _accepted || const {'NO_SHOW', 'CANCELLED'}.contains(_status),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _cancel();
+        if (!didPop && !const {'NO_SHOW', 'CANCELLED'}.contains(_status)) _cancel();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F8FC),
@@ -676,6 +698,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                 onPay: _payNow,
                 onWalletPay: _payWallet,
                 walletAvailable: _booking['walletPaymentAvailable'] != false,
+                canCancelLatePickup: _booking['canCancelLatePickup'] == true,
               ),
             ],
           ),
@@ -792,6 +815,7 @@ class _SearchPanel extends StatelessWidget {
     required this.onPay,
     required this.onWalletPay,
     required this.walletAvailable,
+    required this.canCancelLatePickup,
   });
   final String vehicleName;
   final String vehicleImage;
@@ -812,6 +836,7 @@ class _SearchPanel extends StatelessWidget {
   final VoidCallback onPay;
   final VoidCallback onWalletPay;
   final bool walletAvailable;
+  final bool canCancelLatePickup;
 
   String get title => switch (status) {
     'DRIVER_ACCEPTED' => 'Driver found',
@@ -1170,6 +1195,16 @@ class _SearchPanel extends StatelessWidget {
                   ),
                 ),
         ),
+        if (accepted && canCancelLatePickup && const {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(status)) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: cancelling ? null : onCancel,
+              child: Text(cancelling ? 'Cancelling...' : 'Cancel late pickup'),
+            ),
+          ),
+        ],
       ],
     ),
   );

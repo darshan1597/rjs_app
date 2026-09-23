@@ -18,6 +18,7 @@ const schema = z.object({
   DEV_FIXED_OTP: z.string().regex(/^\d{6}$/).default('123456'),
   LOCAL_RIDE_GST_PERCENT: z.coerce.number().min(0).max(100).default(5),
   GOOGLE_MAPS_SERVER_API_KEY: z.string().min(1).optional(),
+  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
   RAZORPAY_KEY_ID: z.string().min(1).optional(),
   RAZORPAY_KEY_SECRET: z.string().min(1).optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().min(1).optional(),

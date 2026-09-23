@@ -14,6 +14,8 @@ class SavedPlacesService {
     required String landmark,
     required String city,
     required String pincode,
+    double? latitude,
+    double? longitude,
   }) async {
     final body = {
       'type': type,
@@ -22,6 +24,8 @@ class SavedPlacesService {
       'landmark': landmark,
       'city': city,
       'pincode': pincode,
+      if (latitude != null && longitude != null)
+        'location': {'latitude': latitude, 'longitude': longitude},
     };
     final data = id == null
         ? await CustomerAuthService.authorizedPost('customer/addresses', body)

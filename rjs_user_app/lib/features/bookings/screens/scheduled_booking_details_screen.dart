@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../rides/services/customer_booking_service.dart';
 import '../models/scheduled_booking_status.dart';
+import '../widgets/late_pickup_cancel_dialog.dart';
 
 class ScheduledBookingDetailsScreen extends StatefulWidget {
   const ScheduledBookingDetailsScreen({
@@ -26,6 +27,7 @@ class _ScheduledBookingDetailsScreenState
   late Map<String, dynamic> _booking;
   Timer? _timer;
   bool _refreshing = false;
+  bool _cancelling = false;
   String? _error;
 
   @override
@@ -61,6 +63,23 @@ class _ScheduledBookingDetailsScreenState
         );
     } finally {
       _refreshing = false;
+    }
+  }
+
+  Future<void> _cancelLatePickup() async {
+    final reason = await chooseLatePickupCancelReason(context);
+    if (reason == null || !mounted) return;
+    setState(() => _cancelling = true);
+    try {
+      final booking = await CustomerBookingService.cancel(_booking['id'].toString(), reason: reason);
+      if (mounted) setState(() => _booking = booking);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+      await _refresh();
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
     }
   }
 
@@ -148,7 +167,7 @@ class _ScheduledBookingDetailsScreenState
                   if (overdue) ...[
                     const SizedBox(height: 10),
                     const Text(
-                      'The pickup time has passed and your driver has not started toward pickup. Please contact RJS support to resolve this booking. Your booking has not been cancelled.',
+                      'The booked pickup time has passed. You can cancel if the assigned driver has not arrived, or contact RJS support.',
                       style: TextStyle(color: AppColors.muted, fontSize: 13),
                     ),
                   ],
@@ -225,6 +244,14 @@ class _ScheduledBookingDetailsScreenState
                     Navigator.of(context).pushNamed('/help-support'),
                 icon: const Icon(Icons.support_agent),
                 label: const Text('Contact RJS support'),
+              ),
+            ],
+            if (_booking['canCancelLatePickup'] == true) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _cancelling ? null : _cancelLatePickup,
+                icon: const Icon(Icons.cancel_outlined),
+                label: Text(_cancelling ? 'Cancelling...' : 'Cancel late pickup'),
               ),
             ],
           ],

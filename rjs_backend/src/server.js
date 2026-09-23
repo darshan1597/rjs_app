@@ -2,10 +2,12 @@ import { createApp } from './app.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { env } from './config/env.js';
 import { startWalletCleanup } from './modules/wallets/wallet-cleanup.service.js';
+import { startDriverReminders } from './modules/drivers/driver-reminder.service.js';
 
 async function start() {
   await connectDatabase();
   const stopWalletCleanup = startWalletCleanup();
+  const stopDriverReminders = startDriverReminders();
   const app = createApp();
   const server = app.listen(env.PORT, () => {
     console.log(`RJS backend listening on port ${env.PORT}`);
@@ -15,6 +17,7 @@ async function start() {
     console.log(`${signal} received; shutting down`);
     server.close(async () => {
       await stopWalletCleanup();
+      await stopDriverReminders();
       await disconnectDatabase();
       process.exit(0);
     });

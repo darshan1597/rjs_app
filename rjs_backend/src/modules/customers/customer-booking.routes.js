@@ -15,6 +15,8 @@ import { computeRoute } from '../maps/maps.service.js';
 import { closeQrCode, createOrder, fetchPayment, verifyCheckoutSignature } from '../payments/razorpay.service.js';
 import { createSingleFlight } from '../../common/single-flight.js';
 import { scheduledPickupState } from '../bookings/scheduled-pickup-policy.js';
+import { pickupCancellationState } from '../bookings/pickup-cancellation.policy.js';
+import { releaseDriverAfterPickupEnds } from '../bookings/release-driver.service.js';
 
 const router = express.Router();
 const paymentOrderFlight = createSingleFlight();
@@ -40,6 +42,13 @@ const createSchema = z.object({
 const id = z.string().regex(/^[a-f\d]{24}$/i);
 const bookingIdSchema = z.object({
   body: z.unknown().optional(),
+  params: z.object({ bookingId: id }),
+  query: empty,
+});
+const cancelSchema = z.object({
+  body: z.object({
+    reason: z.enum(['DRIVER_LATE', 'DRIVER_NOT_MOVING', 'CANNOT_CONTACT_DRIVER']).optional(),
+  }),
   params: z.object({ bookingId: id }),
   query: empty,
 });
@@ -105,6 +114,7 @@ const toCustomerBooking = (booking) => ({
   serviceType: booking.serviceType,
   timing: booking.timing,
   pickupOverdue: scheduledPickupState(booking).pickupOverdue,
+  ...pickupCancellationState(booking),
   scheduledStartAt: booking.scheduledStartAt,
   scheduledEndAt: booking.scheduledEndAt,
   estimatedDistanceKm: booking.estimatedDistanceKm,
@@ -594,20 +604,34 @@ router.post('/:bookingId/retry-search', validate(bookingIdSchema), async (req, r
   }
 });
 
-router.post('/:bookingId/cancel', validate(bookingIdSchema), async (req, res, next) => {
+router.post('/:bookingId/cancel', validate(cancelSchema), async (req, res, next) => {
   try {
+    const existing = await Booking.findOne({ _id: req.validated.params.bookingId, customerId: req.customer.id });
+    if (!existing) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found');
+    const latePickup = pickupCancellationState(existing).canCancelLatePickup;
+    const confirmed = ['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'].includes(existing.status);
+    if (confirmed && (!latePickup || !req.validated.body.reason)) {
+      throw new AppError(409, 'PICKUP_NOT_LATE', 'Cancellation is available only after the driver is late to pickup and a reason is selected');
+    }
+    if (!confirmed && !['SEARCHING_DRIVER', 'AWAITING_PAYMENT', 'NO_DRIVER_AVAILABLE'].includes(existing.status)) {
+      throw new AppError(409, 'BOOKING_CANNOT_BE_CANCELLED', 'This booking can no longer be cancelled');
+    }
+    const reason = confirmed ? req.validated.body.reason : 'SEARCH_CANCELLED';
+    const now = new Date();
     const booking = await Booking.findOneAndUpdate(
       {
         _id: req.validated.params.bookingId,
         customerId: req.customer.id,
-        status: { $in: ['SEARCHING_DRIVER', 'DRIVER_ACCEPTED', 'AWAITING_PAYMENT', 'NO_DRIVER_AVAILABLE'] },
+        status: existing.status,
+        updatedAt: existing.updatedAt,
+        ...(confirmed ? { currentDriverId: existing.currentDriverId } : {}),
       },
       {
-        $set: { status: 'CANCELLED' },
+        $set: { status: 'CANCELLED', cancellation: { actor: 'CUSTOMER', reason, at: now } },
         $push: {
           statusHistory: {
             status: 'CANCELLED',
-            note: 'Cancelled by customer before payment',
+            note: `Cancelled by customer: ${reason}`,
           },
         },
       },
@@ -620,6 +644,7 @@ router.post('/:bookingId/cancel', validate(bookingIdSchema), async (req, res, ne
         'This booking can no longer be cancelled',
       );
     }
+    if (confirmed) await releaseDriverAfterPickupEnds(booking.currentDriverId);
     return res.json({
       success: true,
       data: { booking: toCustomerBooking(booking) },

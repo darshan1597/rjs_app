@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
 import '../core/network/driver_api_service.dart';
+import '../core/notifications/driver_push_service.dart';
 import '../features/auth/screens/driver_login_screen.dart';
 import '../features/home/screens/driver_home_screen.dart';
 
@@ -12,6 +13,7 @@ class RjsDriverApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'RJS Driver',
+    scaffoldMessengerKey: DriverPushService.messengerKey,
     theme: AppTheme.light,
     home: const _DriverAuthGate(),
   );

@@ -147,6 +147,12 @@ const bookingSchema = new mongoose.Schema({
     required: true 
   },
   assignmentDeadline: Date,
+  pickupDueAt: Date,
+  cancellation: {
+    actor: { type: String, enum: ['CUSTOMER', 'DRIVER'] },
+    reason: String,
+    at: Date,
+  },
   status: { 
     type: String, 
     enum: ['NEW', 'SEARCHING_DRIVER', 'DRIVER_ACCEPTED', 'AWAITING_PAYMENT', 'PAYMENT_CONFIRMED', 'ASSIGNMENT_PENDING', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING', 'COMPLETED', 'CANCELLED', 'NO_DRIVER_AVAILABLE', 'NO_SHOW'], 

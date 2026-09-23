@@ -11,9 +11,12 @@ import '../services/maps_service.dart';
 import '../../saved_places/services/saved_places_service.dart';
 
 class LocationSearchScreen extends StatefulWidget {
-  const LocationSearchScreen({super.key, this.initialValue, this.initialPlace});
+  const LocationSearchScreen({super.key, this.initialValue, this.initialPlace,
+    this.title = 'Choose Destination', this.searchHint = 'Search destination', this.startOnMap = false});
   final String? initialValue;
   final MapPlace? initialPlace;
+  final String title, searchHint;
+  final bool startOnMap;
 
   @override
   State<LocationSearchScreen> createState() => _LocationSearchScreenState();
@@ -38,8 +41,13 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
     super.initState();
     _search = TextEditingController(text: widget.initialValue ?? '');
     _sessionToken = _newSessionToken();
-    if (_search.text.trim().length >= 3) _scheduleSearch(_search.text);
+    if (!widget.startOnMap && _search.text.trim().length >= 3) _scheduleSearch(_search.text);
     _loadSaved();
+    if (widget.startOnMap) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openMapPicker();
+      });
+    }
   }
 
   @override
@@ -217,10 +225,10 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
           child: Row(children: [
             _RoundButton(icon: Icons.arrow_back_rounded, onTap: () => Navigator.pop(context)),
             const SizedBox(width: 14),
-            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Choose Destination', style: TextStyle(color: AppColors.navy, fontSize: 22, fontWeight: FontWeight.w800)),
-              SizedBox(height: 2),
-              Text('Search a real place or use your location', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.title, style: const TextStyle(color: AppColors.navy, fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 2),
+              const Text('Search a real place or use your location', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
             ])),
           ]),
         ),
@@ -232,7 +240,7 @@ class _LocationSearchScreenState extends State<LocationSearchScreen> {
             onChanged: _scheduleSearch,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: 'Search destination',
+              hintText: widget.searchHint,
               prefixIcon: const Icon(Icons.search_rounded, color: AppColors.orange),
               suffixIcon: IconButton(tooltip: 'Use current location', onPressed: _busy ? null : _currentLocation, icon: const Icon(Icons.my_location_rounded, color: AppColors.blue)),
               filled: true,

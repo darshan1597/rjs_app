@@ -11,6 +11,11 @@ val rjsEnvironment = Properties().apply {
     if (environmentFile.exists()) environmentFile.inputStream().use { stream -> load(stream) }
 }
 
+// Existing local builds keep working until the Firebase Android app is configured.
+if (file("google-services.json").exists()) {
+    pluginManager.apply("com.google.gms.google-services")
+}
+
 android {
     namespace = "com.rjstours.driver"
     compileSdk = flutter.compileSdkVersion
