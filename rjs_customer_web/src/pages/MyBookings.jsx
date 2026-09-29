@@ -1,0 +1,20 @@
+import { useEffect, useState } from 'react';
+import { CalendarDays, LoaderCircle, MapPin, Navigation } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import Navbar from '../components/Navbar.jsx';
+import Footer from '../components/Footer.jsx';
+import { api } from '../lib/api.js';
+import { useAuth } from '../context/AuthContext.jsx';
+
+const money = (value) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0);
+const labels = { NEW: 'Scheduled', SEARCHING_DRIVER: 'Finding driver', NO_DRIVER_AVAILABLE: 'No driver found', ASSIGNED: 'Driver assigned', DRIVER_ACCEPTED: 'Driver accepted', DRIVER_EN_ROUTE: 'Driver en route', ARRIVED: 'Driver arrived', IN_PROGRESS: 'Ride in progress', PAYMENT_PENDING: 'Payment pending', COMPLETED: 'Completed', CANCELLED: 'Cancelled', NO_SHOW: 'No show' };
+
+export default function MyBookings() {
+  const navigate = useNavigate(); const { signedIn } = useAuth();
+  const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  useEffect(() => {
+    if (!signedIn) { navigate('/login', { replace: true, state: { returnTo: '/my-bookings' } }); return; }
+    api('/api/v1/customer/bookings').then(data => setBookings(data.bookings || [])).catch(err => setError(err.message)).finally(() => setLoading(false));
+  }, [signedIn, navigate]);
+  return <><Navbar /><main className="min-h-[72vh] bg-[#f5f6f8] py-14"><div className="mx-auto w-[min(920px,calc(100%-32px))]"><small className="font-extrabold tracking-[1.4px] text-[#9a7010]">YOUR JOURNEYS</small><h1 className="mt-2 mb-8 font-[Manrope] text-4xl font-bold text-[var(--navy)]">My bookings</h1>{loading && <LoaderCircle className="mx-auto mt-20 h-9 w-9 animate-spin text-[#a87808]" />}{error && <p className="rounded-xl bg-[#fff0f0] p-4 text-sm text-[#b83232]">{error}</p>}{!loading && !error && bookings.length === 0 && <div className="rounded-2xl border border-dashed border-[#ccd3dd] bg-white p-12 text-center"><p className="font-bold text-[var(--navy)]">No rides booked yet</p><button onClick={() => navigate('/available-vehicles')} className="mt-5 rounded-lg border-0 bg-[var(--gold)] px-5 py-3 text-xs font-bold text-[var(--navy)]">Book a ride</button></div>}<div className="grid gap-4">{bookings.map(booking => <article key={booking.id} className="rounded-2xl border border-[#e5e8ed] bg-white p-5 shadow-[0_8px_30px_rgba(7,26,61,.05)]"><div className="mb-4 flex items-start justify-between gap-3"><div><small className="text-[9px] font-extrabold tracking-[1px] text-[#8f99a8]">{booking.bookingNumber}</small><h2 className="mt-1 font-[Manrope] text-lg font-bold text-[var(--navy)]">{booking.vehicleVariant?.replaceAll('_',' ') || 'RJS ride'}</h2></div><span className="rounded-full bg-[#eef3fa] px-3 py-1.5 text-[9px] font-bold text-[#274d7d]">{labels[booking.status] || booking.status}</span></div><div className="grid gap-3 text-[11px] text-[#667284]"><p className="flex items-start gap-2"><MapPin className="mt-0.5 w-4 shrink-0 text-[#2c8a67]" />{booking.pickup?.address}</p><p className="flex items-start gap-2"><Navigation className="mt-0.5 w-4 shrink-0 text-[#b98509]" />{booking.destination?.address}</p><div className="flex flex-wrap gap-5 border-t border-[#edf0f3] pt-3"><span className="flex items-center gap-1.5"><CalendarDays className="w-3.5" />{new Date(booking.scheduledStartAt || booking.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span><b className="ml-auto text-sm text-[var(--navy)]">{money(booking.amount)}</b></div></div><button onClick={() => navigate(`/booking-status/${booking.id}`)} className="mt-4 w-full rounded-xl border border-[#dce2e9] bg-[#f8f9fb] py-2.5 text-[10px] font-extrabold text-[var(--navy)] hover:border-[#d0a844] hover:bg-[#fffaf0]">View ride status</button></article>)}</div><p className="mt-7 text-center text-[10px] text-[#788291]">For payment, wallet and ratings, please use the RJS customer app.</p></div></main><Footer /></>;
+}

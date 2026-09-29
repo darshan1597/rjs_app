@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { AppError } from '../../common/errors/app-error.js';
@@ -9,6 +10,7 @@ import { DriverOtp, DriverSession } from './driver-auth.model.js';
 import { authenticateDriver } from './driver-auth.middleware.js';
 import { Driver } from './driver.model.js';
 import { createOtpLimiters } from '../../common/middleware/rate-limits.js';
+import { SupportTicket } from '../support/support-ticket.model.js';
 
 const router = express.Router();
 const otpLimits = createOtpLimiters();
@@ -18,6 +20,20 @@ const phone = z.string().trim().regex(/^\d{10}$/);
 const requestSchema = z.object({ body: z.object({ phone }), params: empty, query: empty });
 const verifySchema = z.object({ body: z.object({ phone, otp: z.string().regex(/^\d{6}$/) }), params: empty, query: empty });
 const refreshSchema = z.object({ body: z.object({ refreshToken: z.string().min(20) }), params: empty, query: empty });
+const notificationPreferencesSchema = z.object({
+  body: z.object({
+    pushEnabled: z.boolean(),
+    scheduledRideReminders: z.boolean(),
+    foregroundAlerts: z.boolean(),
+  }),
+  params: empty,
+  query: empty,
+});
+const profileChangeRequestSchema = z.object({
+  body: z.object({ area: z.enum(['PERSONAL', 'PHOTO', 'DOCUMENTS', 'VEHICLE', 'BANK']), details: z.string().trim().min(10).max(2000) }),
+  params: empty,
+  query: empty,
+});
 
 const safeDriver = (driver) => ({
   id: driver.id,
@@ -25,11 +41,31 @@ const safeDriver = (driver) => ({
   status: driver.status,
   operationalStatus: driver.operationalStatus,
   serviceAssignment: driver.serviceAssignment,
+  notificationPreferences: driver.notificationPreferences,
   name: driver.personal.fullName,
   phone: driver.personal.phone,
   email: driver.personal.email,
   profilePhoto: driver.personal.profilePhoto,
+  personal: {
+    fullName: driver.personal.fullName,
+    phone: driver.personal.phone,
+    email: driver.personal.email,
+    dateOfBirth: driver.personal.dateOfBirth,
+    gender: driver.personal.gender,
+    residentialAddress: driver.personal.residentialAddress,
+    emergencyContact: driver.personal.emergencyContact,
+    phoneVerifiedAt: driver.personal.phoneVerifiedAt,
+  },
+  licence: driver.licence,
   vehicle: driver.vehicle,
+  documents: driver.documents,
+  bank: {
+    accountHolderName: driver.bank?.accountHolderName,
+    accountNumber: `••••${driver.bank?.accountNumber?.slice(-4) || ''}`,
+    ifscCode: driver.bank?.ifscCode,
+    upiId: driver.bank?.upiId,
+  },
+  createdAt: driver.createdAt,
 });
 
 const driverPhoneQuery = (phoneNumber) => ({
@@ -141,5 +177,41 @@ router.post('/refresh', validate(refreshSchema), async (req, res, next) => {
 router.get('/me', authenticateDriver, (req, res) => res.json({ 
   success: true, data: { driver: safeDriver(req.driver) } 
 }));
+
+router.patch('/notification-preferences', authenticateDriver, validate(notificationPreferencesSchema), async (req, res, next) => {
+  try {
+    req.driver.notificationPreferences = req.validated.body;
+    await req.driver.save();
+    return res.json({ success: true, data: { preferences: req.driver.notificationPreferences } });
+  } catch (error) { return next(error); }
+});
+
+router.post('/profile-change-requests', authenticateDriver, validate(profileChangeRequestSchema), async (req, res, next) => {
+  try {
+    const { area, details } = req.validated.body;
+    const ticket = await SupportTicket.create({
+      ticketNumber: `DR-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`,
+      requesterType: 'DRIVER',
+      requesterName: req.driver.personal.fullName,
+      requesterPhone: req.driver.personal.phone,
+      requesterEmail: req.driver.personal.email,
+      driverId: req.driver._id,
+      profileChangeArea: area,
+      subject: `${area} profile change request · ${req.driver.driverCode}`,
+      category: 'DRIVER',
+      priority: area === 'BANK' ? 'HIGH' : 'MEDIUM',
+      messages: [{ senderType: 'DRIVER', senderName: req.driver.personal.fullName, text: details }],
+    });
+    return res.status(201).json({ success: true, data: { ticketNumber: ticket.ticketNumber, status: ticket.status } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/profile-change-requests', authenticateDriver, async (req, res, next) => {
+  try {
+    const requests = await SupportTicket.find({ driverId: req.driver._id, profileChangeArea: { $exists: true } })
+      .sort({ createdAt: -1 }).limit(20).select('ticketNumber profileChangeArea status reviewDecision reviewNote reviewedAt createdAt messages').lean();
+    return res.json({ success: true, data: { requests } });
+  } catch (error) { return next(error); }
+});
 
 export { router as driverAuthRouter };

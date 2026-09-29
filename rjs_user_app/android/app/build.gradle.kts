@@ -11,6 +11,10 @@ val rjsEnvironment = Properties().apply {
     if (environmentFile.exists()) environmentFile.inputStream().use { stream -> load(stream) }
 }
 
+if (file("google-services.json").exists()) {
+    pluginManager.apply("com.google.gms.google-services")
+}
+
 android {
     namespace = "com.rjstours.customer"
     compileSdk = flutter.compileSdkVersion
@@ -18,6 +22,7 @@ android {
 
     buildFeatures {
         resValues = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -47,6 +52,8 @@ android {
             "google_maps_map_id",
             rjsEnvironment.getProperty("GOOGLE_MAPS_ANDROID_MAP_ID", ""),
         )
+        buildConfigField("String", "RJS_SUPPORT_PHONE", "\"${rjsEnvironment.getProperty("RJS_SUPPORT_PHONE", "")}\"")
+        buildConfigField("String", "RJS_SUPPORT_EMAIL", "\"${rjsEnvironment.getProperty("RJS_SUPPORT_EMAIL", "support@rjstours.in")}\"")
     }
 
     buildTypes {

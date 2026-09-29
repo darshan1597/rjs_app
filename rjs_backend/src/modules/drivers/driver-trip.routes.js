@@ -13,6 +13,8 @@ import { preparePickup, pickupPreparationState, preparationIsFresh } from '../bo
 import { customerNoShowState, immediatePickupDueAt } from '../bookings/pickup-cancellation.policy.js';
 import { releaseDriverAfterPickupEnds } from '../bookings/release-driver.service.js';
 import { computeRoute } from '../maps/maps.service.js';
+import { DriverPayout } from '../payments/payment.model.js';
+import { sendCustomerBookingPush } from '../customers/customer-push.service.js';
 
 const router = express.Router();
 const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.variantId
@@ -21,6 +23,11 @@ const vehicleMatch = (driver) => driver.vehicle.categoryId && driver.vehicle.var
 const empty = z.object({});
 const id = z.string().regex(/^[a-f\d]{24}$/i);
 const idSchema = z.object({ body: empty, params: z.object({ bookingId: id }), query: empty });
+const historySchema = z.object({
+  body: empty.optional(),
+  params: empty,
+  query: z.object({ status: z.enum(['ALL', 'COMPLETED', 'CANCELLED', 'NO_SHOW']).default('ALL') }),
+});
 const pickupLocation = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), recordedAt: z.coerce.date() });
 const previewSchema = z.object({ body: pickupLocation, params: z.object({ bookingId: id }), query: empty });
 const enRouteSchema = z.object({ body: pickupLocation.partial(), params: z.object({ bookingId: id }), query: empty });
@@ -105,6 +112,295 @@ const toActiveTrip = (booking) => ({
 });
 
 router.use(authenticateDriver);
+
+function indiaDayBounds(now = Date.now()) {
+  const offsetMs = 330 * 60000;
+  const india = new Date(now + offsetMs);
+  const start = Date.UTC(india.getUTCFullYear(), india.getUTCMonth(), india.getUTCDate()) - offsetMs;
+  return { start: new Date(start), end: new Date(start + 86400000) };
+}
+
+function earningBuckets(period, now = Date.now()) {
+  const offsetMs = 330 * 60000;
+  const india = new Date(now + offsetMs);
+  const year = india.getUTCFullYear();
+  const month = india.getUTCMonth();
+  const day = india.getUTCDate();
+  const dayStart = Date.UTC(year, month, day) - offsetMs;
+  let currentStart;
+  let next;
+  if (period === 'WEEKLY') {
+    const weekday = (india.getUTCDay() + 6) % 7;
+    currentStart = dayStart - weekday * 86400000;
+    next = (start, step) => start + step * 7 * 86400000;
+  } else if (period === 'MONTHLY') {
+    currentStart = Date.UTC(year, month, 1) - offsetMs;
+    next = (start, step) => {
+      const local = new Date(start + offsetMs);
+      return Date.UTC(local.getUTCFullYear(), local.getUTCMonth() + step, 1) - offsetMs;
+    };
+  } else {
+    currentStart = dayStart;
+    next = (start, step) => start + step * 86400000;
+  }
+  const starts = Array.from({ length: 7 }, (_, index) => next(currentStart, index - 6));
+  return starts.map((start, index) => {
+    const local = new Date(start + offsetMs);
+    const label = period === 'DAILY'
+      ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][local.getUTCDay()]
+      : period === 'WEEKLY'
+      ? `${local.getUTCDate()}/${local.getUTCMonth() + 1}`
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][local.getUTCMonth()];
+    return { index, start: new Date(start), end: new Date(next(start, 1)), label };
+  });
+}
+
+const money = (value) => Math.round(Number(value || 0) * 100) / 100;
+
+router.get('/dashboard', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const { start, end } = indiaDayBounds(now.getTime());
+    const upcomingFilter = {
+      currentDriverId: req.driver._id,
+      timing: 'SCHEDULED',
+      status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED'] },
+      scheduledStartAt: { $gt: now },
+    };
+    const [todayRows, upcomingCount, nextTrip] = await Promise.all([
+      Booking.aggregate([
+        { $match: {
+          currentDriverId: req.driver._id,
+          status: { $in: ['PAYMENT_PENDING', 'COMPLETED'] },
+          completedAt: { $gte: start, $lt: end },
+        } },
+        { $group: {
+          _id: null,
+          completedTrips: { $sum: 1 },
+          distanceKm: { $sum: { $ifNull: ['$estimatedDistanceKm', 0] } },
+          confirmedEarnings: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, { $ifNull: ['$totalAmount', 0] }, 0] } },
+          rating: { $avg: '$customerRating.score' },
+        } },
+      ]),
+      Booking.countDocuments(upcomingFilter),
+      Booking.findOne(upcomingFilter).sort({ scheduledStartAt: 1, _id: 1 })
+        .select('bookingNumber pickup requestedVehicleVariant scheduledStartAt status').lean(),
+    ]);
+    const today = todayRows[0] || { completedTrips: 0, distanceKm: 0, confirmedEarnings: 0 };
+    return res.json({ success: true, data: {
+      today: {
+        completedTrips: today.completedTrips,
+        distanceKm: Math.round(today.distanceKm * 10) / 10,
+        earnings: Math.round(today.confirmedEarnings * 100) / 100,
+        rating: today.rating == null ? null : Math.round(today.rating * 10) / 10,
+      },
+      upcomingCount,
+      nextTrip: nextTrip ? {
+        id: String(nextTrip._id),
+        bookingNumber: nextTrip.bookingNumber,
+        pickup: nextTrip.pickup,
+        vehicleVariant: nextTrip.requestedVehicleVariant,
+        scheduledStartAt: nextTrip.scheduledStartAt,
+        status: nextTrip.status,
+      } : null,
+    } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/history', validate(historySchema), async (req, res, next) => {
+  try {
+    const driverMatch = {
+      $or: [
+        { currentDriverId: req.driver._id },
+        { 'assignments.driverId': req.driver._id },
+      ],
+    };
+    const terminalStatuses = ['COMPLETED', 'CANCELLED', 'NO_SHOW'];
+    const requestedStatus = req.validated.query.status;
+    const filter = {
+      ...driverMatch,
+      status: requestedStatus === 'ALL' ? { $in: terminalStatuses } : requestedStatus,
+    };
+    const now = new Date();
+    const istNow = new Date(now.getTime() + 330 * 60000);
+    const monthStart = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1) - 330 * 60000);
+    const [rides, summaryRows] = await Promise.all([
+      Booking.find(filter).sort({ updatedAt: -1, _id: -1 }).limit(100)
+        .select('bookingNumber pickup destination status totalAmount estimatedDistanceKm paymentMethod paymentChannel cancellation customerRating completedAt updatedAt').lean(),
+      Booking.aggregate([
+        { $match: { ...driverMatch, status: { $in: terminalStatuses }, updatedAt: { $gte: monthStart } } },
+        { $group: {
+          _id: null,
+          totalRides: { $sum: 1 },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, 1, 0] } },
+          cancelled: { $sum: { $cond: [{ $eq: ['$status', 'CANCELLED'] }, 1, 0] } },
+          noShow: { $sum: { $cond: [{ $eq: ['$status', 'NO_SHOW'] }, 1, 0] } },
+          earnings: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, { $ifNull: ['$totalAmount', 0] }, 0] } },
+        } },
+      ]),
+    ]);
+    const summary = summaryRows[0] || { totalRides: 0, completed: 0, cancelled: 0, noShow: 0, earnings: 0 };
+    return res.json({ success: true, data: {
+      summary: { ...summary, _id: undefined, earnings: money(summary.earnings) },
+      rides: rides.map((ride) => ({
+        id: String(ride._id),
+        bookingNumber: ride.bookingNumber,
+        pickup: ride.pickup,
+        destination: ride.destination,
+        status: ride.status,
+        amount: money(ride.totalAmount),
+        distanceKm: Math.round(Number(ride.estimatedDistanceKm || 0) * 10) / 10,
+        paymentMethod: ride.paymentMethod || ride.paymentChannel,
+        cancellation: ride.cancellation,
+        rating: ride.customerRating,
+        occurredAt: ride.completedAt || ride.cancellation?.at || ride.updatedAt,
+      })),
+    } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/earnings', async (req, res, next) => {
+  try {
+    const period = ['DAILY', 'WEEKLY', 'MONTHLY'].includes(req.query.period)
+      ? req.query.period : 'DAILY';
+    const now = Date.now();
+    const { start: todayStart, end: todayEnd } = indiaDayBounds(now);
+    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
+    const buckets = earningBuckets(period, now);
+    const branches = buckets.map((bucket) => ({
+      case: { $and: [
+        { $gte: ['$completedAt', bucket.start] },
+        { $lt: ['$completedAt', bucket.end] },
+      ] },
+      then: bucket.index,
+    }));
+    const paidFilter = { currentDriverId: req.driver._id, status: 'COMPLETED' };
+    const [periodRows, todayRows, yesterdayRows, lifetimeRows, payoutRows, recentRides, nextPayout] = await Promise.all([
+      Booking.aggregate([
+        { $match: { ...paidFilter, completedAt: { $gte: buckets[0].start, $lt: buckets.at(-1).end } } },
+        { $group: { _id: { $switch: { branches, default: -1 } }, amount: { $sum: { $ifNull: ['$totalAmount', 0] } } } },
+      ]),
+      Booking.aggregate([
+        { $match: { currentDriverId: req.driver._id, status: { $in: ['PAYMENT_PENDING', 'COMPLETED'] }, completedAt: { $gte: todayStart, $lt: todayEnd } } },
+        { $group: {
+          _id: null,
+          completedTrips: { $sum: 1 },
+          distanceKm: { $sum: { $ifNull: ['$estimatedDistanceKm', 0] } },
+          tripEarnings: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, { $ifNull: ['$totalAmount', 0] }, 0] } },
+        } },
+      ]),
+      Booking.aggregate([
+        { $match: { ...paidFilter, completedAt: { $gte: yesterdayStart, $lt: todayStart } } },
+        { $group: { _id: null, earnings: { $sum: { $ifNull: ['$totalAmount', 0] } } } },
+      ]),
+      Booking.aggregate([
+        { $match: paidFilter },
+        { $group: { _id: null, earnings: { $sum: { $ifNull: ['$totalAmount', 0] } } } },
+      ]),
+      DriverPayout.aggregate([
+        { $match: {
+          driverId: req.driver._id,
+          periodStart: { $gte: todayStart, $lt: todayEnd },
+          periodEnd: { $lte: todayEnd },
+        } },
+        { $group: { _id: null, incentives: { $sum: '$incentives' }, deductions: { $sum: '$deductions' } } },
+      ]),
+      Booking.find({ ...paidFilter, completedAt: { $ne: null } }).sort({ completedAt: -1 }).limit(20)
+        .select('bookingNumber pickup destination totalAmount completedAt').lean(),
+      DriverPayout.findOne({ driverId: req.driver._id, status: { $in: ['PENDING', 'PROCESSING'] } })
+        .sort({ payoutDate: 1, periodEnd: 1 }).select('payoutDate periodEnd status netPayout').lean(),
+    ]);
+    const values = Array(7).fill(0);
+    for (const row of periodRows) if (row._id >= 0 && row._id < values.length) values[row._id] = money(row.amount);
+    const current = values[6];
+    const previous = values[5];
+    const changePercent = previous > 0 ? Math.round((current - previous) * 1000 / previous) / 10 : null;
+    const today = todayRows[0] || { completedTrips: 0, distanceKm: 0, tripEarnings: 0 };
+    const payout = payoutRows[0] || { incentives: 0, deductions: 0 };
+    const tripEarnings = money(today.tripEarnings);
+    const incentives = money(payout.incentives);
+    const deductions = money(payout.deductions);
+    const yesterdayEarnings = money(yesterdayRows[0]?.earnings);
+    const todayTotal = money(tripEarnings + incentives - deductions);
+    const todayChangePercent = yesterdayEarnings > 0
+      ? Math.round((tripEarnings - yesterdayEarnings) * 1000 / yesterdayEarnings) / 10 : null;
+    const periodLabels = period === 'DAILY'
+      ? ['Today', 'Yesterday'] : period === 'WEEKLY'
+      ? ['This Week', 'Last Week'] : ['This Month', 'Last Month'];
+    return res.json({ success: true, data: {
+      period,
+      today: {
+        earnings: todayTotal,
+        totalEarnings: money(lifetimeRows[0]?.earnings),
+        completedTrips: today.completedTrips,
+        distanceKm: Math.round(today.distanceKm * 10) / 10,
+        changePercent: todayChangePercent,
+      },
+      overview: {
+        currentLabel: periodLabels[0], previousLabel: periodLabels[1],
+        current, previous, changePercent,
+        bars: buckets.map((bucket) => ({ label: bucket.label, amount: values[bucket.index], active: bucket.index === 6 })),
+      },
+      breakup: { total: todayTotal, tripEarnings, incentives, deductions },
+      transactions: recentRides.map((ride) => ({
+        id: String(ride._id),
+        title: `${ride.pickup?.address || 'Pickup'} → ${ride.destination?.address || 'Destination'}`,
+        occurredAt: ride.completedAt,
+        amount: money(ride.totalAmount),
+        type: 'TRIP_EARNING',
+      })),
+      payout: nextPayout ? {
+        status: nextPayout.status,
+        amount: money(nextPayout.netPayout),
+        scheduledAt: nextPayout.payoutDate || nextPayout.periodEnd,
+      } : null,
+    } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/profile-summary', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const istNow = new Date(now.getTime() + 330 * 60000);
+    const monthStart = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1) - 330 * 60000);
+    const [summary] = await Booking.aggregate([
+      { $facet: {
+        allCompleted: [
+          { $match: { currentDriverId: req.driver._id, status: 'COMPLETED' } },
+          { $group: { _id: null, count: { $sum: 1 }, averageRating: { $avg: '$customerRating.score' } } },
+        ],
+        monthlyCompleted: [
+          { $match: { currentDriverId: req.driver._id, status: 'COMPLETED', completedAt: { $gte: monthStart } } },
+          { $group: { _id: null, trips: { $sum: 1 }, distanceKm: { $sum: { $ifNull: ['$estimatedDistanceKm', 0] } },
+            averageRating: { $avg: '$customerRating.score' } } },
+        ],
+        monthlyAccepted: [
+          { $match: { currentDriverId: req.driver._id, updatedAt: { $gte: monthStart } } },
+          { $count: 'count' },
+        ],
+        monthlyRejected: [
+          { $match: { rejectedDriverIds: req.driver._id, updatedAt: { $gte: monthStart } } },
+          { $count: 'count' },
+        ],
+      } },
+    ]);
+    const completed = summary?.monthlyCompleted?.[0] || {};
+    const accepted = summary?.monthlyAccepted?.[0]?.count || 0;
+    const rejected = summary?.monthlyRejected?.[0]?.count || 0;
+    const offered = accepted + rejected;
+    return res.json({ success: true, data: {
+      totalTrips: summary?.allCompleted?.[0]?.count || 0,
+      averageRating: summary?.allCompleted?.[0]?.averageRating == null ? null
+        : Math.round(summary.allCompleted[0].averageRating * 10) / 10,
+      thisMonth: {
+        completedTrips: completed.trips || 0,
+        distanceKm: Math.round((completed.distanceKm || 0) * 10) / 10,
+        averageRating: completed.averageRating == null ? null : Math.round(completed.averageRating * 10) / 10,
+        acceptanceRate: offered > 0 ? Math.round(accepted * 1000 / offered) / 10 : null,
+      },
+    } });
+  } catch (error) { return next(error); }
+});
 
 router.post('/:bookingId/pickup-preview', validate(previewSchema), async (req, res, next) => {
   try {
@@ -287,6 +583,7 @@ router.post('/:bookingId/accept', validate(idSchema), async (req, res, next) => 
         console.warn('Using 30-minute pickup cancellation fallback', { bookingId: booking.id, code: error.code || 'ROUTE_UNAVAILABLE' });
       }
     }
+    sendCustomerBookingPush(booking, 'DRIVER_ACCEPTED');
     return res.json({ success: true, data: { booking: toOffer(booking) } });
   } catch (error) { return next(error); }
 });
@@ -319,6 +616,7 @@ async function transition(req, res, next, from, to, extra = {}) {
       req.driver.operationalStatus = 'ONLINE';
       await req.driver.save();
     }
+    sendCustomerBookingPush(booking, to);
     return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
   } catch (error) { return next(error); }
 }
@@ -370,6 +668,7 @@ router.post('/:bookingId/arrive', validate(arriveSchema), async (req, res, next)
       { new: true, runValidators: true },
     );
     if (!arrived) throw new AppError(409, 'INVALID_TRIP_TRANSITION', 'The trip changed. Refresh and try again');
+    sendCustomerBookingPush(arrived, 'ARRIVED');
     return res.json({ success: true, data: { trip: toActiveTrip(arrived) } });
   } catch (error) { return next(error); }
 });
@@ -393,6 +692,7 @@ router.post('/:bookingId/customer-no-show', validate(idSchema), async (req, res,
     );
     if (!booking) throw new AppError(409, 'NO_SHOW_NOT_AVAILABLE', 'The trip changed. Refresh and try again');
     await releaseDriverAfterPickupEnds(req.driver._id);
+    sendCustomerBookingPush(booking, 'NO_SHOW');
     return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
   } catch (error) { return next(error); }
 });
@@ -412,6 +712,7 @@ router.post('/:bookingId/start', validate(startSchema), async (req, res, next) =
       { new: true, runValidators: true },
     );
     if (!started) throw new AppError(409, 'INVALID_TRIP_TRANSITION', 'The trip changed. Refresh and try again');
+    sendCustomerBookingPush(started, 'IN_PROGRESS');
     return res.json({ success: true, data: { trip: toActiveTrip(started) } });
   } catch (error) { return next(error); }
 });
@@ -454,6 +755,7 @@ router.post('/:bookingId/complete', validate(completeSchema), async (req, res, n
 
     // Generate QR only on request, so the customer can choose wallet first.
     await booking.save();
+    sendCustomerBookingPush(booking, 'PAYMENT_PENDING');
     return res.json({ success: true, data: { trip: toActiveTrip(booking) } });
   } catch (error) { 
     return next(error); 

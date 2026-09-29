@@ -53,6 +53,12 @@ const pricingSnapshotSchema = new mongoose.Schema({
   totalFare: Number,
 }, { _id: false });
 
+const customerRatingSchema = new mongoose.Schema({
+  score: { type: Number, required: true, min: 1, max: 5 },
+  review: { type: String, trim: true, maxlength: 500 },
+  submittedAt: { type: Date, required: true, default: Date.now },
+}, { _id: false });
+
 const bookingSchema = new mongoose.Schema({
   bookingNumber: {
     type: String,
@@ -256,6 +262,7 @@ const bookingSchema = new mongoose.Schema({
     origin: { latitude: Number, longitude: Number },
     route: { distanceMeters: Number, distanceKm: Number, durationSeconds: Number, durationMinutes: Number, encodedPolyline: String },
   },
+  customerRating: customerRatingSchema,
 }, { timestamps: true });
 
 bookingSchema.index({ customerId: 1, bookingRequestKey: 1 }, { unique: true, partialFilterExpression: { bookingRequestKey: { $type: 'string' } } });

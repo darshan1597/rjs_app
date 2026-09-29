@@ -105,51 +105,6 @@ class _ScheduledRidesScreenState extends State<ScheduledRidesScreen> {
     }
   }
 
-  // Original visual reference; real rides are loaded from the backend below.
-  // ignore: unused_field
-  static const _rides = [
-    _ScheduledRide(
-      '10:15\nAM',
-      '24 May',
-      'Koramangala 4th Block',
-      'Near Forum Mall, Bengaluru',
-      '18.2 km',
-      '10:15 AM',
-      'Darshan',
-      '4.8',
-    ),
-    _ScheduledRide(
-      '01:45\nPM',
-      '24 May',
-      'Indiranagar 100 Feet Road',
-      'Near Metro Station',
-      '12.6 km',
-      '01:45 PM',
-      'Rahul',
-      '4.6',
-    ),
-    _ScheduledRide(
-      '05:00\nPM',
-      '24 May',
-      'BTM Layout 2nd Stage',
-      'Near Water Tank',
-      '9.8 km',
-      '05:00 PM',
-      'Meena',
-      '4.7',
-    ),
-    _ScheduledRide(
-      '09:30\nAM',
-      '25 May',
-      'JP Nagar 7th Phase',
-      'Near Capital School',
-      '14.3 km',
-      '09:30 AM',
-      'Suresh',
-      '4.5',
-    ),
-  ];
-
   void _selectTab(int index) {
     final Widget? page = switch (index) {
       0 => const DriverHomeScreen(),

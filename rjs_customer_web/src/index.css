@@ -1,0 +1,282 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+:root {
+  --navy: #071a3d;
+  --blue: #10366f;
+  --gold: #eeb21b;
+  --cream: #f6f3ec;
+  --ink: #101a2d;
+  --muted: #697387;
+  --line: #e2e5ea;
+  --white: #fff;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #b88917 rgba(7, 26, 61, 0.07);
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 90px;
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  overflow-x: clip;
+  background: #fff;
+  color: var(--ink);
+  font-family: "DM Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+a {
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.25s ease,
+    opacity 0.2s ease,
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+button:active {
+  transform: scale(0.975);
+}
+
+input,
+textarea,
+select {
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible {
+  outline: none;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(238, 178, 27, 0.9);
+  outline-offset: 3px;
+}
+
+.rjs-map-pin {
+  display: inline-block;
+  line-height: 0;
+}
+
+.rjs-map-pin svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.rjs-map-pin.is-pulsing .rjs-pin-waves ellipse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rjsPickupWave 1.8s ease-out infinite;
+}
+
+.rjs-map-pin.is-pulsing .rjs-pin-waves ellipse:last-child {
+  animation-delay: .55s;
+}
+
+@keyframes rjsPickupWave {
+  0% { opacity: .72; transform: scale(.55); }
+  75%, 100% { opacity: 0; transform: scale(1.65); }
+}
+
+@keyframes bookingSearch {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(240%); }
+}
+
+.route-stage {
+  min-height: 100vh;
+  animation: routeEnter 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.scroll-reveal {
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  transition:
+    opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+[data-result-card].scroll-reveal {
+  animation: none;
+}
+
+[data-result-card].scroll-reveal.is-visible:hover {
+  transform: translate3d(0, -4px, 0);
+}
+
+.rjs-filter-scrollbar {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: #b88917 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(7, 26, 61, 0.07);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #b88917;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #071a3d;
+}
+
+.rjs-filter-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.rjs-filter-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rjs-filter-scrollbar::-webkit-scrollbar-thumb {
+  background: #b88917;
+}
+
+.rjs-filter-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #071a3d;
+}
+
+@keyframes routeEnter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cardRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bookingEnter {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes buttonShine {
+  0%,
+  72% {
+    left: -45%;
+  }
+  100% {
+    left: 125%;
+  }
+}
+
+@keyframes routeCar {
+  0%,
+  100% {
+    transform: translateX(-2px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes appButtonShine {
+  0%,
+  68% {
+    left: -38%;
+  }
+  100% {
+    left: 128%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .route-stage,
+  [data-result-card] {
+    animation: none !important;
+  }
+
+  .scroll-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

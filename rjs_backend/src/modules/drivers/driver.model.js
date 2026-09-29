@@ -42,6 +42,11 @@ const driverSchema = new mongoose.Schema({
     speedMetresPerSecond: { type: Number, min: 0 },
     recordedAt: Date,
   },
+  notificationPreferences: {
+    pushEnabled: { type: Boolean, default: true },
+    scheduledRideReminders: { type: Boolean, default: true },
+    foregroundAlerts: { type: Boolean, default: true },
+  },
   serviceAssignment: { 
     type: String, 
     enum: ['LOCAL', 'OUTSTATION', 'FLEXIBLE'], 

@@ -287,7 +287,10 @@ class _BookingsScreenState extends State<BookingsScreen>
                     const SizedBox(height: 10),
                   ],
                   if (_showCompleted && _completedTrips.isNotEmpty)
-                    _DynamicCompletedTrips(bookings: _completedTrips),
+                    _DynamicCompletedTrips(
+                      bookings: _completedTrips,
+                      onRate: _showRating,
+                    ),
                   if (_visibleTripsEmpty)
                     const _BookingsMessage(
                       message: 'No bookings found for this filter.',
@@ -300,6 +303,135 @@ class _BookingsScreenState extends State<BookingsScreen>
       ),
     ),
   );
+
+  Future<void> _showRating(Map<String, dynamic> booking) async {
+    final reviewController = TextEditingController();
+    var score = 0;
+    var saving = false;
+    final submitted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              22,
+              4,
+              22,
+              22 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Rate your ride',
+                  style: TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  booking['driver']?['name']?.toString() ??
+                      'How was your driver?',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    final value = index + 1;
+                    return IconButton(
+                      tooltip: '$value star${value == 1 ? '' : 's'}',
+                      onPressed: saving
+                          ? null
+                          : () => setSheetState(() => score = value),
+                      icon: Icon(
+                        value <= score
+                            ? Icons.star_rounded
+                            : Icons.star_border_rounded,
+                        color: const Color(0xFFFFB300),
+                        size: 38,
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reviewController,
+                  enabled: !saving,
+                  maxLength: 500,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Review (optional)',
+                    hintText: 'Tell us about your ride',
+                    filled: true,
+                    fillColor: const Color(0xFFF7F9FC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: FilledButton(
+                    onPressed: saving || score == 0
+                        ? null
+                        : () async {
+                            setSheetState(() => saving = true);
+                            try {
+                              await CustomerBookingService.submitRating(
+                                bookingId: booking['id'].toString(),
+                                score: score,
+                                review: reviewController.text,
+                              );
+                              if (sheetContext.mounted) {
+                                Navigator.pop(sheetContext, true);
+                              }
+                            } catch (error) {
+                              setSheetState(() => saving = false);
+                              if (sheetContext.mounted) {
+                                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      error.toString().replaceFirst(
+                                        'Exception: ',
+                                        '',
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.orange,
+                    ),
+                    child: Text(saving ? 'Submitting...' : 'Submit rating'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    reviewController.dispose();
+    if (submitted == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Thank you for rating your ride.')),
+      );
+      await _loadBookings(silent: true);
+    }
+  }
 
   Future<void> _showFilters() async {
     final selected = await showModalBottomSheet<_TripFilter>(
@@ -432,19 +564,7 @@ class _HeaderButton extends StatelessWidget {
           children: [
             Icon(icon, color: AppColors.navy, size: 29),
             if (notification)
-              Positioned(
-                right: 7,
-                top: 7,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: AppColors.orange,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
+              const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
           ],
         ),
       ),
@@ -982,8 +1102,9 @@ class _UpcomingTrips extends StatelessWidget {
 }
 
 class _DynamicCompletedTrips extends StatelessWidget {
-  const _DynamicCompletedTrips({required this.bookings});
+  const _DynamicCompletedTrips({required this.bookings, required this.onRate});
   final List<Map<String, dynamic>> bookings;
+  final ValueChanged<Map<String, dynamic>> onRate;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -1001,6 +1122,9 @@ class _DynamicCompletedTrips extends StatelessWidget {
         for (var index = 0; index < bookings.length; index++) ...[
           _DynamicCompactTrip(
             booking: bookings[index],
+            onRate: bookings[index]['canRate'] == true
+                ? () => onRate(bookings[index])
+                : null,
             onReceipt:
                 bookings[index]['status'] == 'COMPLETED' &&
                     bookings[index]['paymentStatus'] == 'PAID'
@@ -1021,9 +1145,14 @@ class _DynamicCompletedTrips extends StatelessWidget {
 }
 
 class _DynamicCompactTrip extends StatelessWidget {
-  const _DynamicCompactTrip({required this.booking, this.onReceipt});
+  const _DynamicCompactTrip({
+    required this.booking,
+    this.onReceipt,
+    this.onRate,
+  });
   final Map<String, dynamic> booking;
   final VoidCallback? onReceipt;
+  final VoidCallback? onRate;
 
   @override
   Widget build(BuildContext context) {
@@ -1138,6 +1267,56 @@ class _DynamicCompactTrip extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onRate != null) ...[
+                  const SizedBox(height: 5),
+                  InkWell(
+                    onTap: onRate,
+                    borderRadius: BorderRadius.circular(8),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.star_outline_rounded,
+                            size: 12,
+                            color: Color(0xFFFF9800),
+                          ),
+                          SizedBox(width: 2),
+                          Text(
+                            'Rate ride',
+                            style: TextStyle(
+                              color: Color(0xFFFF7A00),
+                              fontSize: 7.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ] else if (booking['rating'] is Map) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        size: 12,
+                        color: Color(0xFFFFB300),
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '${booking['rating']['score']}/5',
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 7.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ],

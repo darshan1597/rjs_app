@@ -123,10 +123,13 @@ class DriverApiService {
   }
 
   static Future<List<Map<String, dynamic>>> reminders() async {
-    final data = await get('driver/reminders');
+    final data = await reminderInbox();
     return (data['reminders'] as List<dynamic>? ?? const [])
         .cast<Map<String, dynamic>>();
   }
+
+  static Future<Map<String, dynamic>> reminderInbox() =>
+      get('driver/reminders');
 
   static Future<void> markRemindersRead() async {
     await post('driver/reminders/read-all');
@@ -296,6 +299,46 @@ class DriverApiService {
     return data['trip'] as Map<String, dynamic>?;
   }
 
+  static Future<Map<String, dynamic>> dashboard() async =>
+      get('driver/trips/dashboard');
+
+  static Future<Map<String, dynamic>> earnings(String period) async =>
+      get('driver/trips/earnings?period=$period');
+
+  static Future<Map<String, dynamic>> profile() async =>
+      get('driver/auth/me');
+
+  static Future<Map<String, dynamic>> profileSummary() async =>
+      get('driver/trips/profile-summary');
+
+  static Future<Map<String, dynamic>> rideHistory([String status = 'ALL']) async =>
+      get('driver/trips/history?status=$status');
+
+  static Future<Map<String, dynamic>> updateNotificationPreferences(
+    Map<String, bool> preferences,
+  ) async => _decode(
+    await _authorized(
+      (headers) => http.patch(
+        _apiUri('driver/auth/notification-preferences', 'PATCH'),
+        headers: headers,
+        body: jsonEncode(preferences),
+      ).timeout(const Duration(seconds: 15)),
+    ),
+  );
+
+  static Future<Map<String, dynamic>> requestProfileChange(
+    String area,
+    String details,
+  ) => post('driver/auth/profile-change-requests', {
+    'area': area,
+    'details': details,
+  });
+
+  static Future<List<Map<String, dynamic>>> profileChangeRequests() async {
+    final data = await get('driver/auth/profile-change-requests');
+    return (data['requests'] as List? ?? const []).cast<Map<String, dynamic>>();
+  }
+
   static Future<List<Map<String, dynamic>>> scheduledTrips() async {
     final data = await get('driver/trips/scheduled');
     return (data['trips'] as List<dynamic>? ?? const [])
@@ -371,7 +414,9 @@ class DriverApiService {
     return data['trip'] as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> markCustomerNoShow(String bookingId) async {
+  static Future<Map<String, dynamic>> markCustomerNoShow(
+    String bookingId,
+  ) async {
     final data = await post('driver/trips/$bookingId/customer-no-show', {});
     return data['trip'] as Map<String, dynamic>;
   }

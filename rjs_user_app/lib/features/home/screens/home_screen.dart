@@ -9,6 +9,7 @@ import '../../schedule/screens/schedule_ride_screen.dart';
 import '../../tours/screens/tour_packages_screen.dart';
 import '../../wallet/services/wallet_service.dart';
 import '../../wallet/widgets/wallet_credit_celebration.dart';
+import '../../../core/notifications/customer_push_service.dart';
 import '../widgets/journey_planner.dart';
 import '../widgets/map_booking_header.dart';
 import '../widgets/safety_banner.dart';
@@ -31,7 +32,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showPendingWalletCredit());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      CustomerPushService.handlePendingNavigation();
+      _showPendingWalletCredit();
+    });
+    CustomerPushService.registerCurrentDevice();
   }
 
   @override
@@ -51,8 +56,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       final event = await WalletService.claimCreditEvent();
       if (event != null && mounted) {
-        await showDialog<void>(context: context, barrierDismissible: false,
-          builder: (_) => WalletCreditCelebration(event: event));
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => WalletCreditCelebration(event: event),
+        );
       }
     } catch (_) {
       // A wallet notification must never prevent the customer from using the app.

@@ -76,6 +76,21 @@ const updateDriverStatusSchema = z.object({
 });
 
 const driverDetailsSchema = z.object({ body: z.unknown().optional(), params: z.object({ driverId: objectId }), query: empty });
+const reviewDriverChangeSchema = z.object({
+  body: z.object({
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    note: z.string().trim().min(2).max(1000),
+    updates: z.object({
+      personal: z.object({ fullName: requiredText.optional(), email: z.union([z.string().email(), z.literal('')]).optional(), residentialAddress: z.string().trim().min(5).max(500).optional(), emergencyContact: z.string().trim().min(10).max(16).optional() }).optional(),
+      bank: z.object({ accountHolderName: requiredText.optional(), accountNumber: z.string().trim().min(6).max(30).optional(), ifscCode: z.string().trim().min(8).max(15).optional(), upiId: z.string().trim().max(100).optional() }).optional(),
+      vehicle: z.object({ manufacturer: requiredText.optional(), model: requiredText.optional(), fuelType: requiredText.optional(), color: requiredText.optional() }).optional(),
+      profilePhoto: driverFileUrl.optional(),
+      documents: z.array(z.object({ name: requiredText, fileName, url: driverFileUrl })).optional(),
+    }).optional(),
+  }),
+  params: z.object({ driverId: objectId, requestId: objectId }),
+  query: empty,
+});
 
 const phoneVerificationRequestSchema = z.object({
   body: z.object({ phone: z.string().trim().regex(/^(?:\+91|91)?[6-9]\d{9}$/) }), params: empty, query: empty,
@@ -88,4 +103,4 @@ const phoneVerificationConfirmSchema = z.object({
   }), params: empty, query: empty,
 });
 
-export { createDriverSchema, driverDetailsSchema, listDriversSchema, phoneVerificationConfirmSchema, phoneVerificationRequestSchema, updateDriverStatusSchema };
+export { createDriverSchema, driverDetailsSchema, listDriversSchema, phoneVerificationConfirmSchema, phoneVerificationRequestSchema, reviewDriverChangeSchema, updateDriverStatusSchema };

@@ -27,19 +27,7 @@ class HomeHeader extends StatelessWidget {
               onPressed: () => showRjsNotifications(context),
               filled: true,
             ),
-            Positioned(
-              right: 7,
-              top: 7,
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: AppColors.orange,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
-                ),
-              ),
-            ),
+            const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
           ],
         ),
       ],

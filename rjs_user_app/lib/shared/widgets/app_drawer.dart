@@ -93,7 +93,12 @@ class AppDrawer extends StatelessWidget {
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   child: Divider(color: Color(0xFFE9ECF1)),
                 ),
-                _item(context, Icons.verified_user_rounded, 'Safety Centre'),
+                _item(
+                  context,
+                  Icons.verified_user_rounded,
+                  'Safety Centre',
+                  onTap: () => _openRoute(context, '/help-support'),
+                ),
                 _item(
                   context,
                   Icons.help_rounded,
@@ -101,7 +106,12 @@ class AppDrawer extends StatelessWidget {
                   selected: activeRoute == '/help-support',
                   onTap: () => _openRoute(context, '/help-support'),
                 ),
-                _item(context, Icons.settings_rounded, 'Settings'),
+                _item(
+                  context,
+                  Icons.settings_rounded,
+                  'Settings',
+                  onTap: () => _openRoute(context, '/profile'),
+                ),
                 _item(
                   context,
                   Icons.info_rounded,

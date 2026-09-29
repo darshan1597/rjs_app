@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import '../../../core/network/driver_api_service.dart';
 import '../../../core/location/driver_location_service.dart';
 import '../../../core/notifications/driver_push_service.dart';
+import '../../../core/notifications/driver_notification_store.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
 import '../../earnings/screens/earnings_screen.dart';
 import '../../profile/screens/driver_profile_screen.dart';
+import '../../rides/screens/ride_history_screen.dart';
+import '../../support/screens/contact_support_screen.dart';
 import '../../trips/screens/scheduled_rides_screen.dart';
 import '../../trips/screens/pickup_preview_screen.dart';
 import '../widgets/active_trip_card.dart';
@@ -32,14 +35,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Timer? _offerTimer;
   Map<String, dynamic>? _activeTrip;
   Map<String, dynamic>? _driver;
+  Map<String, dynamic>? _dashboard;
+  DateTime? _dashboardLoadedAt;
+  bool _dashboardLoading = false;
   bool _tripBusy = false;
 
   @override
   void initState() {
     super.initState();
     DriverPushService.registerCurrentDevice();
+    DriverNotificationStore.refreshUnreadCount().catchError((_) {});
     DriverApiService.session().then((session) {
-      if (mounted) setState(() => _driver = session?['driver'] as Map<String, dynamic>?);
+      if (mounted) {
+        setState(() => _driver = session?['driver'] as Map<String, dynamic>?);
+      }
     });
     _startOnlineMode();
   }
@@ -85,7 +94,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       final activeTrip = await DriverApiService.activeTrip();
       if (!mounted) return;
       if (activeTrip != null) {
-        setState(() { _activeTrip = activeTrip; _isOnline = true; });
+        setState(() {
+          _activeTrip = activeTrip;
+          _isOnline = true;
+        });
         await DriverLocationService.ensureRunning(activeTrip);
         _showError('You have an active ride. Continue it from the card above.');
         return;
@@ -105,6 +117,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
   Future<void> _pollOffers() async {
     if (_offerOpen || !mounted) return;
+    unawaited(_refreshDashboard());
     try {
       final activeTrip = await DriverApiService.activeTrip();
       if (!mounted) return;
@@ -122,6 +135,42 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     } catch (_) {
       // A polling failure is retried silently on the next interval.
     }
+  }
+
+  Future<void> _refreshDashboard({bool force = false}) async {
+    if (_dashboardLoading) return;
+    if (!force &&
+        _dashboardLoadedAt != null &&
+        DateTime.now().difference(_dashboardLoadedAt!) <
+            const Duration(seconds: 30)) {
+      return;
+    }
+    _dashboardLoading = true;
+    try {
+      final dashboard = await DriverApiService.dashboard();
+      if (!mounted) return;
+      setState(() {
+        _dashboard = dashboard;
+        _dashboardLoadedAt = DateTime.now();
+      });
+    } catch (_) {
+      // Keep the most recent dashboard while a background refresh is retried.
+    } finally {
+      _dashboardLoading = false;
+    }
+  }
+
+  Future<void> _openScheduledTrips() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const ScheduledRidesScreen()),
+    );
+    if (mounted) await _refreshDashboard(force: true);
+  }
+
+  Future<void> _openEarnings() async {
+    await Navigator.of(context)
+        .push<void>(MaterialPageRoute(builder: (_) => const EarningsScreen()));
+    if (mounted) await _refreshDashboard(force: true);
   }
 
   Future<void> _showOffer(Map<String, dynamic> offer) async {
@@ -151,7 +200,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               if (mounted) {
                 final activeTrip = await DriverApiService.activeTrip();
                 await DriverLocationService.ensureRunning(activeTrip);
+                await _refreshDashboard(force: true);
                 await _pollOffers();
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
@@ -213,7 +264,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final id = trip['id'].toString();
     final status = trip['status'].toString();
     if (arrive && status != 'DRIVER_EN_ROUTE') return;
-    if (!arrive && {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(status)) {
+    if (!arrive &&
+        {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(status)) {
       await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => PickupPreviewScreen(trip: trip)),
       );
@@ -246,6 +298,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         _ => await DriverApiService.activeTrip(),
       };
       if (mounted) setState(() => _activeTrip = updated);
+      await _refreshDashboard(force: true);
     } catch (error) {
       if (mounted) _showError(error);
     } finally {
@@ -260,10 +313,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Customer no-show?'),
-        content: const Text('Only mark this if you are at the pickup and the customer has not appeared after 10 minutes. The ride will end without a charge.'),
+        content: const Text(
+          'Only mark this if you are at the pickup and the customer has not appeared after 10 minutes. The ride will end without a charge.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Keep waiting')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Mark no-show')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep waiting'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Mark no-show'),
+          ),
         ],
       ),
     );
@@ -272,10 +333,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     try {
       await DriverApiService.markCustomerNoShow(trip['id'].toString());
       await DriverLocationService.stop();
-      if (mounted) {
-        setState(() => _activeTrip = null);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Customer no-show recorded')));
-      }
+      if (!mounted) return;
+      setState(() => _activeTrip = null);
+      await _refreshDashboard(force: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Customer no-show recorded')),
+      );
     } catch (error) {
       if (mounted) _showError(error);
     } finally {
@@ -303,13 +367,37 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Complete trip & calculate bill', style: TextStyle(color: AppColors.navy, fontSize: 20, fontWeight: FontWeight.w900)),
+            const Text(
+              'Complete trip & calculate bill',
+              style: TextStyle(
+                color: AppColors.navy,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
             const SizedBox(height: 6),
-            const Text('Pickup waiting is calculated automatically. Enter only charges actually incurred during this ride.', style: TextStyle(color: AppColors.muted)),
+            const Text(
+              'Pickup waiting is calculated automatically. Enter only charges actually incurred during this ride.',
+              style: TextStyle(color: AppColors.muted),
+            ),
             const SizedBox(height: 16),
-            TextField(controller: parking, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parking charge', prefixText: '₹ ')),
+            TextField(
+              controller: parking,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Parking charge',
+                prefixText: '₹ ',
+              ),
+            ),
             const SizedBox(height: 10),
-            TextField(controller: toll, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Toll charge', prefixText: '₹ ')),
+            TextField(
+              controller: toll,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Toll charge',
+                prefixText: '₹ ',
+              ),
+            ),
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
@@ -319,8 +407,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   'parkingCharge': double.tryParse(parking.text) ?? 0,
                   'tollCharge': double.tryParse(toll.text) ?? 0,
                 }),
-                style: FilledButton.styleFrom(backgroundColor: AppColors.orange),
-                child: const Text('Generate final bill', style: TextStyle(fontWeight: FontWeight.w900)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.orange,
+                ),
+                child: const Text(
+                  'Generate final bill',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
               ),
             ),
           ],
@@ -343,13 +436,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               clipBehavior: Clip.none,
               children: [
                 DriverHomeHeader(isOnline: _isOnline, driver: _driver),
-                Positioned(left: 0, right: 0, top: 215, child: VehicleCard(vehicle: _driver?['vehicle'] as Map<String, dynamic>?)),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 215,
+                  child: VehicleCard(
+                    vehicle: _driver?['vehicle'] as Map<String, dynamic>?,
+                  ),
+                ),
                 Positioned(
                   right: 20,
                   top: 117,
                   width: 170,
                   height: 112,
-                  child: _DriverVehicleImage(vehicle: _driver?['vehicle'] as Map<String, dynamic>?),
+                  child: _DriverVehicleImage(
+                    vehicle: _driver?['vehicle'] as Map<String, dynamic>?,
+                  ),
                 ),
               ],
             ),
@@ -374,13 +476,36 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 ),
                 const SizedBox(height: 11),
               ],
-              const TodayOverview(),
+              TodayOverview(
+                data: _dashboard?['today'] as Map<String, dynamic>?,
+                onSeeAll: _openEarnings,
+              ),
               const SizedBox(height: 11),
-              const NextTripCard(),
+              NextTripCard(
+                trip: _dashboard?['nextTrip'] as Map<String, dynamic>?,
+                upcomingCount:
+                    (_dashboard?['upcomingCount'] as num?)?.toInt() ?? 0,
+                onTap: _openScheduledTrips,
+              ),
               const SizedBox(height: 11),
-              const QuickActions(),
-              const SizedBox(height: 11),
-              const RegistrationReviewCard(),
+              QuickActions(
+                onLocation: () {
+                  if (_activeTrip == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No active pickup or trip to navigate to.')),
+                    );
+                  } else {
+                    unawaited(_advanceTrip());
+                  }
+                },
+                onEarnings: () => unawaited(_openEarnings()),
+                onHistory: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const RideHistoryScreen()),
+                ),
+                onEmergency: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const ContactSupportScreen()),
+                ),
+              ),
             ],
           ),
         ),
@@ -424,9 +549,23 @@ class _DriverVehicleImage extends StatelessWidget {
   final Map<String, dynamic>? vehicle;
   @override
   Widget build(BuildContext context) {
-    final source = DriverApiService.absoluteUrl(vehicle?['masterPhoto']?.toString());
+    final source = DriverApiService.absoluteUrl(
+      vehicle?['masterPhoto']?.toString(),
+    );
     return source.isEmpty
-        ? Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain, alignment: Alignment.bottomRight)
-        : Image.network(source, fit: BoxFit.contain, alignment: Alignment.bottomRight, errorBuilder: (_, __, ___) => Image.asset('assets/images/driver-car-final.png', fit: BoxFit.contain));
+        ? Image.asset(
+            'assets/images/driver-car-final.png',
+            fit: BoxFit.contain,
+            alignment: Alignment.bottomRight,
+          )
+        : Image.network(
+            source,
+            fit: BoxFit.contain,
+            alignment: Alignment.bottomRight,
+            errorBuilder: (_, __, ___) => Image.asset(
+              'assets/images/driver-car-final.png',
+              fit: BoxFit.contain,
+            ),
+          );
   }
 }

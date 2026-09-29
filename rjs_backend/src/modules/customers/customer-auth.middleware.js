@@ -33,4 +33,10 @@ async function authenticateCustomer(req, res, next) {
   }
 }
 
-export { authenticateCustomer };
+function optionalAuthenticateCustomer(req, res, next) {
+  const authorization = req.get('authorization') || '';
+  if (!authorization.startsWith('Bearer ')) return next();
+  return authenticateCustomer(req, res, next);
+}
+
+export { authenticateCustomer, optionalAuthenticateCustomer };

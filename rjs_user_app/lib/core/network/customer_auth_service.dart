@@ -139,6 +139,7 @@ class CustomerAuthService {
         headers: headers,
         body: jsonEncode(body ?? {}),
       ),
+      'PUT' => http.put(uri, headers: headers, body: jsonEncode(body ?? {})),
       'DELETE' => http.delete(
         uri,
         headers: headers,
@@ -185,8 +186,31 @@ class CustomerAuthService {
     return _decode(response);
   }
 
-  static Future<Map<String, dynamic>> authorizedDelete(String path) async {
-    final response = await _authorizedRequest('DELETE', path);
+  static Future<Map<String, dynamic>> authorizedPut(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final response = await _authorizedRequest('PUT', path, body: body);
+    if (response == null) throw Exception('Please sign in again');
+    return _decode(response);
+  }
+
+  static Future<void> registerPushToken(String token) async {
+    await authorizedPut('customer/notifications/device', {
+      'token': token,
+      'platform': 'android',
+    });
+  }
+
+  static Future<void> unregisterPushToken() async {
+    await authorizedDelete('customer/notifications/device');
+  }
+
+  static Future<Map<String, dynamic>> authorizedDelete(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final response = await _authorizedRequest('DELETE', path, body: body);
     if (response == null) throw Exception('Please sign in again');
     return _decode(response);
   }
@@ -222,6 +246,32 @@ class CustomerAuthService {
     return customer;
   }
 
+  static Future<Map<String, dynamic>> updateNotificationPreferences({
+    required bool pushEnabled,
+    required bool rideUpdates,
+    required bool offers,
+  }) async {
+    final data = await authorizedPatch(
+      'customer/auth/notification-preferences',
+      {
+        'pushEnabled': pushEnabled,
+        'rideUpdates': rideUpdates,
+        'offers': offers,
+      },
+    );
+    final preferences = data['preferences'] as Map<String, dynamic>;
+    final session = await _loadSession();
+    if (session != null) {
+      final customer = Map<String, dynamic>.from(
+        session['customer'] as Map<String, dynamic>? ?? const {},
+      );
+      customer['notificationPreferences'] = preferences;
+      session['customer'] = customer;
+      await saveSession(session);
+    }
+    return preferences;
+  }
+
   static Future<bool> restoreSession() async {
     try {
       return await getMe() != null;
@@ -244,5 +294,13 @@ class CustomerAuthService {
     } finally {
       await clearSession();
     }
+  }
+
+  static Future<void> deleteAccount() async {
+    await authorizedDelete(
+      'customer/auth/me',
+      body: const {'confirmation': 'DELETE'},
+    );
+    await clearSession();
   }
 }

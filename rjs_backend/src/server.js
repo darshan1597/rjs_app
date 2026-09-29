@@ -3,11 +3,13 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { env } from './config/env.js';
 import { startWalletCleanup } from './modules/wallets/wallet-cleanup.service.js';
 import { startDriverReminders } from './modules/drivers/driver-reminder.service.js';
+import { startCustomerReminders } from './modules/customers/customer-reminder.service.js';
 
 async function start() {
   await connectDatabase();
   const stopWalletCleanup = startWalletCleanup();
   const stopDriverReminders = startDriverReminders();
+  const stopCustomerReminders = startCustomerReminders();
   const app = createApp();
   const server = app.listen(env.PORT, () => {
     console.log(`RJS backend listening on port ${env.PORT}`);
@@ -18,6 +20,7 @@ async function start() {
     server.close(async () => {
       await stopWalletCleanup();
       await stopDriverReminders();
+      await stopCustomerReminders();
       await disconnectDatabase();
       process.exit(0);
     });

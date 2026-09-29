@@ -17,7 +17,7 @@ void main() {
     expect(find.text('Plan your journey'), findsOneWidget);
     expect(find.text('Schedule Ride'), findsOneWidget);
     expect(find.text('City Round Trip'), findsOneWidget);
-    expect(find.text('Outstation Trip'), findsOneWidget);
+    expect(find.text('Tour Packages'), findsOneWidget);
     expect(find.text('Rental Package'), findsOneWidget);
     expect(find.text('Choose a ride'), findsNothing);
     expect(find.text('Book Ride'), findsOneWidget);

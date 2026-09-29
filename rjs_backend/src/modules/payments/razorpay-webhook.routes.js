@@ -6,6 +6,7 @@ import { Driver } from '../drivers/driver.model.js';
 import { closeQrCode, verifyWebhookSignature } from './razorpay.service.js';
 import { creditTopup } from '../wallets/wallet.service.js';
 import { completeRefund, failRefund } from './payment.service.js';
+import { sendCustomerBookingPush } from '../customers/customer-push.service.js';
 
 const router = express.Router();
 const paymentMethod = (method) => ({
@@ -59,6 +60,7 @@ async function settlePayment({ payment, eventId }) {
     await closeQrCode(booking.razorpayQrCodeId).catch(() => {});
   }
   await Driver.updateOne({ _id: booking.currentDriverId }, { $set: { operationalStatus: 'ONLINE' } });
+  sendCustomerBookingPush(booking, 'COMPLETED');
 }
 
 async function recordFailedPayment({ payment, eventId }) {

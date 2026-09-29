@@ -26,6 +26,13 @@ class CustomerBookingService {
         .cast<Map<String, dynamic>>();
   }
 
+  static Future<Map<String, dynamic>> summary() async {
+    final data = await CustomerAuthService.authorizedGet(
+      'customer/bookings/summary/counts',
+    );
+    return data['summary'] as Map<String, dynamic>;
+  }
+
   static Future<Map<String, dynamic>> create({
     required String pickupAddress,
     required String destinationAddress,
@@ -69,7 +76,26 @@ class CustomerBookingService {
     return data['receipt'] as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> cancel(String bookingId, {String? reason}) async {
+  static Future<Map<String, dynamic>> submitRating({
+    required String bookingId,
+    required int score,
+    String? review,
+  }) async {
+    final cleanedReview = review?.trim();
+    final data = await CustomerAuthService.authorizedPost(
+      'customer/bookings/$bookingId/rating',
+      {
+        'score': score,
+        'review': ?(cleanedReview?.isNotEmpty == true ? cleanedReview : null),
+      },
+    );
+    return data['rating'] as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> cancel(
+    String bookingId, {
+    String? reason,
+  }) async {
     final data = await CustomerAuthService.authorizedPost(
       'customer/bookings/$bookingId/cancel',
       {if (reason != null) 'reason': reason},

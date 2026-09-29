@@ -6,6 +6,7 @@ import { Booking } from '../bookings/booking.model.js';
 import { preparationIsFresh } from '../bookings/pickup-preparation.service.js';
 import { DriverSession } from './driver-auth.model.js';
 import { DriverReminder } from './driver-reminder.model.js';
+import { Driver } from './driver.model.js';
 
 const MINUTE = 60000;
 const PREPARE_LEAD_MS = 60 * MINUTE;
@@ -83,6 +84,12 @@ function messaging() {
 }
 
 async function sendReminder(reminder, now) {
+  const driver = await Driver.findById(reminder.driverId).select('notificationPreferences').lean();
+  if (driver?.notificationPreferences?.pushEnabled === false ||
+      driver?.notificationPreferences?.scheduledRideReminders === false) {
+    await DriverReminder.updateOne({ _id: reminder._id, status: 'CLAIMED' }, { $set: { status: 'OBSOLETE' } });
+    return;
+  }
   const booking = await Booking.findById(reminder.bookingId).select('currentDriverId timing status scheduledStartAt').lean();
   if (!booking || booking.timing !== 'SCHEDULED' ||
       !['ASSIGNED', 'DRIVER_ACCEPTED'].includes(booking.status) ||

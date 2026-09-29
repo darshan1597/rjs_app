@@ -20,6 +20,7 @@ android {
     namespace = "com.rjstours.driver"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -41,6 +42,8 @@ android {
         versionName = flutter.versionName
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] =
             rjsEnvironment.getProperty("GOOGLE_MAPS_ANDROID_API_KEY", "")
+        buildConfigField("String", "RJS_SUPPORT_PHONE", "\"${rjsEnvironment.getProperty("RJS_SUPPORT_PHONE", "")}\"")
+        buildConfigField("String", "RJS_SUPPORT_EMAIL", "\"${rjsEnvironment.getProperty("RJS_SUPPORT_EMAIL", "support@rjs.com")}\"")
     }
 
     buildTypes {

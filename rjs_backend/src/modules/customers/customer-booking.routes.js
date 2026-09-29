@@ -17,6 +17,9 @@ import { createSingleFlight } from '../../common/single-flight.js';
 import { scheduledPickupState } from '../bookings/scheduled-pickup-policy.js';
 import { pickupCancellationState } from '../bookings/pickup-cancellation.policy.js';
 import { releaseDriverAfterPickupEnds } from '../bookings/release-driver.service.js';
+import { sendCustomerBookingPush } from './customer-push.service.js';
+import { submitCustomerRating } from './customer-rating.service.js';
+import { createLimiter } from '../../common/middleware/rate-limits.js';
 
 const router = express.Router();
 const paymentOrderFlight = createSingleFlight();
@@ -58,6 +61,15 @@ const verifyPaymentSchema = z.object({
     razorpayPaymentId: z.string().min(5).max(100),
     razorpayOrderId: z.string().min(5).max(100),
     razorpaySignature: z.string().min(20).max(200),
+  }),
+  params: z.object({ bookingId: id }),
+  query: empty,
+});
+
+const ratingSchema = z.object({
+  body: z.object({
+    score: z.number().int().min(1).max(5),
+    review: z.string().trim().max(500).optional(),
   }),
   params: z.object({ bookingId: id }),
   query: empty,
@@ -132,7 +144,45 @@ const toCustomerBooking = (booking) => ({
       ? booking.currentDriverId.currentLocation
       : undefined,
   } : undefined,
+  rating: booking.customerRating ? {
+    score: booking.customerRating.score,
+    review: booking.customerRating.review,
+    submittedAt: booking.customerRating.submittedAt,
+  } : undefined,
+  canRate: booking.status === 'COMPLETED' && booking.paymentStatus === 'PAID' &&
+    Boolean(booking.currentDriverId) && !booking.customerRating,
   ...booking.status === 'ARRIVED' && booking.tripStartOtp ? { tripStartOtp: booking.tripStartOtp } : {},
+});
+
+const publicCatalogLimiter = createLimiter({ windowMs: 60000, limit: 20 });
+
+router.get('/public-vehicle-catalog', publicCatalogLimiter, async (_req, res, next) => {
+  try {
+    const [categories, variants, availability] = await Promise.all([
+      VehicleCategory.find({ isActive: true }).sort({ name: 1 }).lean(),
+      VehicleVariant.find({ isActive: true, onRoadPrice: { $gt: 0 } }).sort({ name: 1 }).lean(),
+      Driver.aggregate([
+        { $match: { status: 'ACTIVE', operationalStatus: 'ONLINE', serviceAssignment: { $in: ['LOCAL', 'FLEXIBLE', null] }, 'vehicle.categoryId': { $exists: true }, 'vehicle.variantId': { $exists: true } } },
+        { $group: { _id: { categoryId: '$vehicle.categoryId', variantId: '$vehicle.variantId' }, count: { $sum: 1 } } },
+      ]),
+    ]);
+    const counts = new Map(availability.map((row) => [`${row._id.categoryId}:${row._id.variantId}`, row.count]));
+    return res.json({ success: true, data: { categories: categories.map((category) => ({
+      id: category._id,
+      name: category.name,
+      code: category.code,
+      photoUrl: category.photoUrl,
+      variants: variants.filter((variant) => String(variant.categoryId) === String(category._id)).map((variant) => ({
+        id: variant._id,
+        name: variant.name,
+        code: variant.code,
+        photoUrl: variant.photoUrl,
+        availableDrivers: counts.get(`${category._id}:${variant._id}`) || 0,
+        available: (counts.get(`${category._id}:${variant._id}`) || 0) > 0,
+        temporarySeats: seats[variant.code] || 4,
+      })),
+    })).filter((category) => category.variants.length > 0) } });
+  } catch (error) { return next(error); }
 });
 
 router.use(authenticateCustomer);
@@ -341,6 +391,30 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+router.get('/summary/counts', async (req, res, next) => {
+  try {
+    const rows = await Booking.aggregate([
+      { $match: { customerId: req.customer._id } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+    const counts = Object.fromEntries(rows.map((row) => [row._id, row.count]));
+    const upcomingStatuses = ['SEARCHING_DRIVER', 'NO_DRIVER_AVAILABLE', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'PAYMENT_PENDING'];
+    return res.json({
+      success: true,
+      data: {
+        summary: {
+          upcoming: upcomingStatuses.reduce((total, status) => total + (counts[status] || 0), 0),
+          completed: counts.COMPLETED || 0,
+          cancelled: (counts.CANCELLED || 0) + (counts.NO_SHOW || 0),
+          total: rows.reduce((total, row) => total + row.count, 0),
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get('/:bookingId', validate(bookingIdSchema), async (req, res, next) => {
   try {
     await expireDriverSearches({
@@ -448,6 +522,19 @@ router.get('/:bookingId/receipt', validate(bookingIdSchema), async (req, res, ne
   }
 });
 
+router.post('/:bookingId/rating', validate(ratingSchema), async (req, res, next) => {
+  try {
+    const rating = await submitCustomerRating({
+      customerId: req.customer.id,
+      bookingId: req.validated.params.bookingId,
+      ...req.validated.body,
+    });
+    return res.status(201).json({ success: true, data: { rating } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.post('/:bookingId/payment-order', validate(bookingIdSchema), async (req, res, next) => {
   try {
     const booking = await Booking.findOneAndUpdate({
@@ -543,6 +630,7 @@ router.post('/:bookingId/verify-payment', validate(verifyPaymentSchema), async (
     if (booking.razorpayQrCodeId) await closeQrCode(booking.razorpayQrCodeId).catch(() => {});
 
     await Driver.updateOne({ _id: booking.currentDriverId }, { $set: { operationalStatus: 'ONLINE' } });
+    sendCustomerBookingPush(booking, 'COMPLETED');
     return res.json({ success: true, data: { booking: toCustomerBooking(booking) } });
   } catch (error) { 
     return next(error); 

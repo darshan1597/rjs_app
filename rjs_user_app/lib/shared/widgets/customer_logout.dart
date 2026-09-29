@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/network/customer_auth_service.dart';
+import '../../core/notifications/customer_notification_store.dart';
+import '../../core/notifications/customer_push_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../features/auth/screens/login_screen.dart';
 
@@ -56,7 +58,9 @@ Future<void> confirmCustomerLogout(BuildContext context) async {
   );
 
   if (confirmed != true || !context.mounted) return;
+  await CustomerPushService.unregisterCurrentDevice();
   await CustomerAuthService.logout();
+  CustomerNotificationStore.clear();
   if (!context.mounted) return;
   Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const LoginScreen()),

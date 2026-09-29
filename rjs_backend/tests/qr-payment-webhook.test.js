@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { vi } from 'vitest';
+vi.mock('../src/modules/customers/customer-push.service.js', () => ({ sendCustomerBookingPush: vi.fn().mockResolvedValue({ sent: 0 }) }));
 vi.mock('../src/modules/wallets/wallet.service.js', () => ({ creditTopup: vi.fn().mockResolvedValue(false) }));
 
 vi.mock('../src/modules/bookings/booking.model.js', () => ({ Booking: { findOne: vi.fn() } }));

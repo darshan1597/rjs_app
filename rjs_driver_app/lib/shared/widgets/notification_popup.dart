@@ -2,7 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import '../../core/network/driver_api_service.dart';
+import '../../core/notifications/driver_notification_store.dart';
 import '../../core/theme/app_colors.dart';
 
 Future<void> showRjsNotifications(BuildContext context, {Rect? anchorRect}) =>
@@ -93,12 +93,14 @@ class _NotificationCard extends StatefulWidget {
 
 class _NotificationCardState extends State<_NotificationCard> {
   late Future<List<Map<String, dynamic>>> _reminders =
-      DriverApiService.reminders();
+      DriverNotificationStore.loadReminders();
 
   Future<void> _markAllRead() async {
     try {
-      await DriverApiService.markRemindersRead();
-      if (mounted) setState(() => _reminders = DriverApiService.reminders());
+      await DriverNotificationStore.markAllRead();
+      if (mounted) {
+        setState(() => _reminders = DriverNotificationStore.loadReminders());
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

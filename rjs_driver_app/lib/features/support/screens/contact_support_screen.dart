@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/driver_bottom_bar.dart';
@@ -7,6 +8,8 @@ import '../../earnings/screens/earnings_screen.dart';
 import '../../home/screens/driver_home_screen.dart';
 import '../../profile/screens/driver_profile_screen.dart';
 import '../../trips/screens/scheduled_rides_screen.dart';
+
+const _configChannel = MethodChannel('rjs.driver/config');
 
 class ContactSupportScreen extends StatefulWidget {
   const ContactSupportScreen({super.key});
@@ -76,6 +79,7 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
                       icon: Icons.phone_in_talk_outlined,
                       title: 'Call Support',
                       subtitle: '24/7 Available',
+                      action: 'phone',
                     ),
                   ),
                   SizedBox(width: 10),
@@ -84,6 +88,7 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
                       icon: Icons.phone_rounded,
                       title: 'WhatsApp',
                       subtitle: 'Quick Response',
+                      action: 'whatsapp',
                     ),
                   ),
                   SizedBox(width: 10),
@@ -92,6 +97,7 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
                       icon: Icons.mail_outline_rounded,
                       title: 'Email Us',
                       subtitle: 'support@rjs.com',
+                      action: 'email',
                     ),
                   ),
                 ],
@@ -236,14 +242,19 @@ class _ContactMethod extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.action,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final String action;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => InkWell(
+    onTap: () => _launchContact(context, action),
+    borderRadius: BorderRadius.circular(13),
+    child: Container(
     height: 112,
     padding: const EdgeInsets.symmetric(horizontal: 5),
     decoration: BoxDecoration(
@@ -285,6 +296,7 @@ class _ContactMethod extends StatelessWidget {
           ),
         ),
       ],
+    ),
     ),
   );
 }
@@ -328,7 +340,7 @@ class _EmergencyCard extends StatelessWidget {
           ),
         ),
         OutlinedButton.icon(
-          onPressed: () {},
+          onPressed: () => _launchContact(context, 'tel:112'),
           icon: const Icon(Icons.phone_outlined, size: 17),
           label: const Text('Call SOS'),
           style: OutlinedButton.styleFrom(
@@ -347,4 +359,32 @@ class _EmergencyCard extends StatelessWidget {
       ],
     ),
   );
+}
+
+Future<void> _launchContact(BuildContext context, String target) async {
+  try {
+    final config = await _configChannel.invokeMapMethod<String, dynamic>('support') ?? const {};
+    final supportPhone = config['phone']?.toString() ?? '';
+    final supportEmail = config['email']?.toString() ?? 'support@rjs.com';
+    if ((target == 'phone' || target == 'whatsapp') && supportPhone.isEmpty) {
+      throw Exception('RJS support number is not configured');
+    }
+    final cleanPhone = supportPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    final destination = switch (target) {
+      'phone' => 'tel:$supportPhone',
+      'whatsapp' => 'https://wa.me/$cleanPhone',
+      'email' => 'mailto:$supportEmail',
+      _ => target,
+    };
+    final launched = await launchUrl(
+      Uri.parse(destination),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched) throw Exception('No compatible app was found');
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Unable to open contact option: $error')),
+    );
+  }
 }

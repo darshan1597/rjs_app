@@ -12,6 +12,7 @@ import '../../location/screens/location_search_screen.dart';
 import '../../location/models/map_place.dart';
 import '../services/customer_booking_service.dart';
 import 'driver_search_screen.dart';
+import '../../../shared/maps/rjs_map_markers.dart';
 
 class ChooseRideScreen extends StatefulWidget {
   const ChooseRideScreen({
@@ -44,6 +45,9 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
   Map<String, dynamic>? _route;
   GoogleMapController? _mapController;
   BitmapDescriptor? _routeCalloutIcon;
+  BitmapDescriptor? _pickupPin;
+  BitmapDescriptor? _destinationPin;
+  late final RjsPickupMarkerPulse _pickupPulse;
 
   @override
   void initState() {
@@ -51,7 +55,23 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
     _pickup = widget.pickup;
     _destination = widget.destination;
     _scheduledFor = widget.scheduledFor;
+    _pickupPulse = RjsPickupMarkerPulse((pin) {
+      if (mounted) setState(() => _pickupPin = pin);
+    });
+    _pickupPulse.start();
+    _loadMapPins();
     _loadRides();
+  }
+
+  Future<void> _loadMapPins() async {
+    final pin = await RjsMapMarkers.destination();
+    if (mounted) setState(() => _destinationPin = pin);
+  }
+
+  @override
+  void dispose() {
+    _pickupPulse.dispose();
+    super.dispose();
   }
 
   Future<void> _loadRides() async {
@@ -358,16 +378,22 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
                   Marker(
                     markerId: const MarkerId('pickup'),
                     position: pickup,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueAzure,
-                    ),
+                    icon:
+                        _pickupPin ??
+                        BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueAzure,
+                        ),
+                    anchor: const Offset(.5, .87),
                   ),
                   Marker(
                     markerId: const MarkerId('destination'),
                     position: destination,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueOrange,
-                    ),
+                    icon:
+                        _destinationPin ??
+                        BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueOrange,
+                        ),
+                    anchor: const Offset(.5, .87),
                   ),
                   if (_routeCalloutIcon != null && points.isNotEmpty)
                     Marker(

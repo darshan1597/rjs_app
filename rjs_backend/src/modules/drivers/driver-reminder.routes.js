@@ -31,10 +31,14 @@ router.delete('/device', async (req, res, next) => {
 
 router.get('/', async (req, res, next) => {
   try {
-    const reminders = await DriverReminder.find({ driverId: req.driver._id, status: { $ne: 'OBSOLETE' },
-      scheduledStartAt: { $gt: new Date(Date.now() - 24 * 60 * 60000) } })
-      .sort({ createdAt: -1 }).limit(20).select('bookingId kind title body createdAt sentAt readAt').lean();
-    return res.json({ success: true, data: { reminders } });
+    const filter = { driverId: req.driver._id, status: { $ne: 'OBSOLETE' },
+      scheduledStartAt: { $gt: new Date(Date.now() - 24 * 60 * 60000) } };
+    const [reminders, unreadCount] = await Promise.all([
+      DriverReminder.find(filter).sort({ createdAt: -1 }).limit(20)
+        .select('bookingId kind title body createdAt sentAt readAt').lean(),
+      DriverReminder.countDocuments({ ...filter, readAt: null }),
+    ]);
+    return res.json({ success: true, data: { reminders, unreadCount } });
   } catch (error) { return next(error); }
 });
 

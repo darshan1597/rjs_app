@@ -4,7 +4,7 @@ import { AppError } from '../../common/errors/app-error.js';
 import { env } from '../../config/env.js';
 import { DriverRegistrationOtp } from './driver-auth.model.js';
 import { Driver } from './driver.model.js';
-import { createDriver as createRecord, getDriverDetails as getDetails, listDrivers as listRecords, updateDriverStatus as updateStatus } from './driver.service.js';
+import { createDriver as createRecord, getDriverDetails as getDetails, listDrivers as listRecords, reviewDriverChange as reviewChange, updateDriverStatus as updateStatus } from './driver.service.js';
 
 async function listDrivers(req, res, next) {
   try {
@@ -42,6 +42,14 @@ async function getDriverDetails(req, res, next) {
   catch (error) { 
     return next(error); 
   }
+}
+
+async function reviewDriverChange(req, res, next) {
+  try {
+    const item = await reviewChange(req.validated.params.driverId, req.validated.params.requestId, req.validated.body, req.admin.id);
+    await writeAuditLog({ req, action: 'driver.profile-change.review', actor: req.admin, targetType: 'Driver', targetId: req.validated.params.driverId, metadata: { requestId: item.id, decision: req.validated.body.decision } });
+    return res.json({ success: true, data: { request: item } });
+  } catch (error) { return next(error); }
 }
 
 const normalizePhone = (phone) => String(phone).replace(/\D/g, '').slice(-10);
@@ -96,4 +104,4 @@ async function confirmPhoneVerification(req, res, next) {
   }
 }
 
-export { confirmPhoneVerification, createDriver, getDriverDetails, listDrivers, requestPhoneVerification, updateDriverStatus };
+export { confirmPhoneVerification, createDriver, getDriverDetails, listDrivers, requestPhoneVerification, reviewDriverChange, updateDriverStatus };

@@ -9,6 +9,7 @@ import '../../../core/network/driver_api_service.dart';
 import '../../../core/navigation/pickup_navigation.dart';
 import '../../../core/location/driver_location_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/maps/rjs_map_markers.dart';
 
 class PickupPreviewScreen extends StatefulWidget {
   const PickupPreviewScreen({super.key, required this.trip});
@@ -25,6 +26,8 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
   Timer? _timer;
   GoogleMapController? _controller;
   DateTime? _lastRefresh;
+  BitmapDescriptor? _pickupPin;
+  late final RjsPickupMarkerPulse _pickupPulse;
   String get _id => widget.trip['id'].toString();
   Map get _trip => _data?['trip'] as Map? ?? widget.trip;
   Map get _preparation => _data?['preparation'] as Map? ?? const {};
@@ -34,7 +37,11 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
       DateTime.tryParse(_trip['scheduledStartAt']?.toString() ?? '');
   bool get _enRoute => _trip['status'] == 'DRIVER_EN_ROUTE';
   bool get _scheduled => _trip['timing'] == 'SCHEDULED';
-  bool get _overdue => !_enRoute && _scheduled && _pickupAt != null && !_pickupAt!.isAfter(DateTime.now());
+  bool get _overdue =>
+      !_enRoute &&
+      _scheduled &&
+      _pickupAt != null &&
+      !_pickupAt!.isAfter(DateTime.now());
   bool get _fresh {
     final date = DateTime.tryParse(_preparation['checkedAt']?.toString() ?? '');
     return date != null &&
@@ -45,13 +52,18 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
       !_overdue &&
       _fresh &&
       !_enRoute &&
-      (!_scheduled || (_departure != null && !_departure!.isAfter(DateTime.now()))) &&
+      (!_scheduled ||
+          (_departure != null && !_departure!.isAfter(DateTime.now()))) &&
       _data?['onlineRequired'] != true;
 
   @override
   void initState() {
     super.initState();
     _refresh();
+    _pickupPulse = RjsPickupMarkerPulse((pin) {
+      if (mounted) setState(() => _pickupPin = pin);
+    });
+    _pickupPulse.start();
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       setState(() {});
@@ -73,6 +85,7 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _pickupPulse.dispose();
     _controller?.dispose();
     super.dispose();
   }
@@ -179,14 +192,21 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
       _error = null;
     });
     try {
-      final origin = await DriverApiService.pickupLocation(requirePrecise: true);
+      final origin = await DriverApiService.pickupLocation(
+        requirePrecise: true,
+      );
       if (!mounted) return;
       final url = pickupNavigationUrl(origin: origin, destination: pickup);
       if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-        throw Exception('Could not open Google Maps. Check that Maps or a browser is installed.');
+        throw Exception(
+          'Could not open Google Maps. Check that Maps or a browser is installed.',
+        );
       }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+      if (mounted)
+        setState(
+          () => _error = error.toString().replaceFirst('Exception: ', ''),
+        );
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -200,7 +220,10 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
       await DriverLocationService.ensureRunning(trip);
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+      if (mounted)
+        setState(
+          () => _error = error.toString().replaceFirst('Exception: ', ''),
+        );
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -247,9 +270,12 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
                       Marker(
                         markerId: const MarkerId('pickup'),
                         position: _point(pickup),
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                          BitmapDescriptor.hueOrange,
-                        ),
+                        icon:
+                            _pickupPin ??
+                            BitmapDescriptor.defaultMarkerWithHue(
+                              BitmapDescriptor.hueAzure,
+                            ),
+                        anchor: const Offset(.5, .87),
                         infoWindow: const InfoWindow(title: 'Pickup'),
                       ),
                     },
@@ -309,10 +335,17 @@ class _PickupPreviewScreenState extends State<PickupPreviewScreen> {
                       label: const Text('Navigate to Pickup'),
                     ),
                   FilledButton(
-                    onPressed: (_enRoute || _canStart) && !_loading && !_starting
+                    onPressed:
+                        (_enRoute || _canStart) && !_loading && !_starting
                         ? (_enRoute ? _arrive : _start)
                         : null,
-                    child: Text(_starting ? 'Updating…' : _enRoute ? "I've Arrived" : 'Start to Pickup'),
+                    child: Text(
+                      _starting
+                          ? 'Updating…'
+                          : _enRoute
+                          ? "I've Arrived"
+                          : 'Start to Pickup',
+                    ),
                   ),
                   OutlinedButton(
                     onPressed: _loading || _starting ? null : _refresh,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/notification_popup.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/app_page_header.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
@@ -25,18 +26,25 @@ class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
   void initState() {
     super.initState();
     final initial = DateTime.now().add(const Duration(minutes: 35));
-    _scheduledFor = DateTime(initial.year, initial.month, initial.day, initial.hour, initial.minute);
+    _scheduledFor = DateTime(
+      initial.year,
+      initial.month,
+      initial.day,
+      initial.hour,
+      initial.minute,
+    );
   }
 
-  Future<MapPlace?> _pickLocation(MapPlace? initial) => Navigator.push<MapPlace>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => LocationSearchScreen(
-        initialValue: initial?.address ?? '',
-        initialPlace: initial,
-      ),
-    ),
-  );
+  Future<MapPlace?> _pickLocation(MapPlace? initial) =>
+      Navigator.push<MapPlace>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LocationSearchScreen(
+            initialValue: initial?.address ?? '',
+            initialPlace: initial,
+          ),
+        ),
+      );
 
   Future<void> _selectPickup() async {
     final value = await _pickLocation(_pickup);
@@ -62,38 +70,83 @@ class _ScheduleRideScreenState extends State<ScheduleRideScreen> {
       lastDate: DateTime.now().add(const Duration(days: 90)),
     );
     if (value != null && mounted) {
-      final candidate = DateTime(value.year, value.month, value.day, _scheduledFor.hour, _scheduledFor.minute);
+      final candidate = DateTime(
+        value.year,
+        value.month,
+        value.day,
+        _scheduledFor.hour,
+        _scheduledFor.minute,
+      );
       final minimum = DateTime.now().add(const Duration(minutes: 35));
-      setState(() => _scheduledFor = candidate.isBefore(minimum) ? minimum : candidate);
+      setState(
+        () => _scheduledFor = candidate.isBefore(minimum) ? minimum : candidate,
+      );
     }
   }
 
   Future<void> _pickTime() async {
-    final value = await showScheduledTimePicker(context: context, date: _scheduledFor, initialTime: TimeOfDay.fromDateTime(_scheduledFor));
+    final value = await showScheduledTimePicker(
+      context: context,
+      date: _scheduledFor,
+      initialTime: TimeOfDay.fromDateTime(_scheduledFor),
+    );
     if (value != null && mounted) {
-      setState(() => _scheduledFor = DateTime(_scheduledFor.year, _scheduledFor.month, _scheduledFor.day, value.hour, value.minute));
+      setState(
+        () => _scheduledFor = DateTime(
+          _scheduledFor.year,
+          _scheduledFor.month,
+          _scheduledFor.day,
+          value.hour,
+          value.minute,
+        ),
+      );
     }
   }
 
   void _continue() {
     if (_pickup == null || _destination == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter both pickup and drop locations')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter both pickup and drop locations')),
+      );
       return;
     }
-    if (_scheduledFor.isBefore(DateTime.now().add(const Duration(minutes: 30)))) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose a pickup time at least 30 minutes from now')));
+    if (_scheduledFor.isBefore(
+      DateTime.now().add(const Duration(minutes: 30)),
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a pickup time at least 30 minutes from now'),
+        ),
+      );
       return;
     }
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => ChooseRideScreen(pickup: _pickup!, destination: _destination!, scheduledFor: _scheduledFor),
+        builder: (_) => ChooseRideScreen(
+          pickup: _pickup!,
+          destination: _destination!,
+          scheduledFor: _scheduledFor,
+        ),
       ),
     );
   }
 
   String get _dateLabel {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${months[_scheduledFor.month - 1]} ${_scheduledFor.day}, ${_scheduledFor.year}';
   }
 
@@ -215,21 +268,14 @@ class _ScheduleHeader extends StatelessWidget {
           clipBehavior: Clip.none,
           children: [
             IconButton(
-              onPressed: () {},
+              onPressed: () => showRjsNotifications(context),
               icon: const Icon(
                 Icons.notifications_none_rounded,
                 color: AppColors.navy,
                 size: 29,
               ),
             ),
-            const Positioned(
-              right: 7,
-              top: 5,
-              child: CircleAvatar(
-                radius: 4.5,
-                backgroundColor: AppColors.orange,
-              ),
-            ),
+            const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
           ],
         ),
       ],
@@ -402,32 +448,32 @@ class _LocationInput extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(11),
         child: Container(
-        height: 39,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(color: const Color(0xFFDDE2EA)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF9299A8),
-                  fontSize: 11.5,
+          height: 39,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: const Color(0xFFDDE2EA)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF9299A8),
+                    fontSize: 11.5,
+                  ),
                 ),
               ),
-            ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.blue,
-              size: 19,
-            ),
-          ],
-        ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.blue,
+                size: 19,
+              ),
+            ],
+          ),
         ),
       ),
     ],
@@ -435,7 +481,12 @@ class _LocationInput extends StatelessWidget {
 }
 
 class _DateTimeSection extends StatelessWidget {
-  const _DateTimeSection({required this.date, required this.time, required this.onDate, required this.onTime});
+  const _DateTimeSection({
+    required this.date,
+    required this.time,
+    required this.onDate,
+    required this.onTime,
+  });
 
   final String date;
   final String time;
@@ -508,27 +559,27 @@ class _PickerField extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFDDE2EA)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                value,
-                style: const TextStyle(color: AppColors.navy, fontSize: 11.5),
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFDDE2EA)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  style: const TextStyle(color: AppColors.navy, fontSize: 11.5),
+                ),
               ),
-            ),
-            const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: AppColors.navy,
-              size: 20,
-            ),
-          ],
-        ),
+              const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: AppColors.navy,
+                size: 20,
+              ),
+            ],
+          ),
         ),
       ),
     ],

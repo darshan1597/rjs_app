@@ -2,16 +2,21 @@ import express from 'express';
 import { z } from 'zod';
 
 import { validate } from '../../common/middleware/validate.js';
-import { authenticateCustomer } from '../customers/customer-auth.middleware.js';
+import { optionalAuthenticateCustomer } from '../customers/customer-auth.middleware.js';
+import { createLimiter } from '../../common/middleware/rate-limits.js';
 import { autocompletePlaces, computeRoute, getPlace, reverseGeocode } from './maps.service.js';
 
 const router = express.Router();
 const empty = z.object({});
 const coordinate = z.coerce.number().finite();
 
-router.use(authenticateCustomer);
+const guestLocationLimiter = createLimiter({ windowMs: 60000, limit: 30 });
+const guestRouteLimiter = createLimiter({ windowMs: 60000, limit: 20 });
+const guestsOnly = (limiter) => (req, res, next) => req.customer ? next() : limiter(req, res, next);
 
-router.get('/autocomplete', validate(z.object({
+router.use(optionalAuthenticateCustomer);
+
+router.get('/autocomplete', guestsOnly(guestLocationLimiter), validate(z.object({
   body: z.unknown().optional(), 
   params: empty,
   query: z.object({ 
@@ -30,7 +35,7 @@ router.get('/autocomplete', validate(z.object({
   catch (error) { return next(error); }
 });
 
-router.get('/places/:placeId', validate(z.object({
+router.get('/places/:placeId', guestsOnly(guestLocationLimiter), validate(z.object({
   body: z.unknown().optional(),
   params: z.object({ 
     placeId: z.string().min(3).max(300) 
@@ -45,7 +50,7 @@ router.get('/places/:placeId', validate(z.object({
   }
 });
 
-router.get('/reverse-geocode', validate(z.object({
+router.get('/reverse-geocode', guestsOnly(guestLocationLimiter), validate(z.object({
   body: z.unknown().optional(), 
   params: empty, 
   query: z.object({ 
@@ -61,7 +66,7 @@ router.get('/reverse-geocode', validate(z.object({
   }
 });
 
-router.post('/route', validate(z.object({
+router.post('/route', guestsOnly(guestRouteLimiter), validate(z.object({
   body: z.object({ 
     origin: z.object({ 
       latitude: coordinate.min(-90).max(90), 

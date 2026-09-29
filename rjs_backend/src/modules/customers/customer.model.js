@@ -18,15 +18,22 @@ const customerSchema = new mongoose.Schema(
         },
         status: { 
             type: String, 
-            enum: ["ACTIVE", "BLOCKED"], 
+            enum: ["ACTIVE", "BLOCKED", "DELETED"],
             default: "ACTIVE" 
         },
+        deletedAt: Date,
         profileCompleted: { 
             type: Boolean, 
             default: false 
         },
         lastLoginAt: Date,
         favoritePlacesRevision: { type: Number, default: 0 },
+        notificationPreferences: {
+            pushEnabled: { type: Boolean, default: true },
+            rideUpdates: { type: Boolean, default: true },
+            offers: { type: Boolean, default: true },
+        },
+        notificationsReadAt: Date,
     },
     { timestamps: true },
 );
@@ -76,6 +83,8 @@ const sessionSchema = new mongoose.Schema(
         revokedAt: Date,
         userAgent: String,
         ip: String,
+        pushToken: { type: String, select: false },
+        pushPlatform: { type: String, enum: ["android", "ios"] },
     },
     { timestamps: true },
 );

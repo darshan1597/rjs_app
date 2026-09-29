@@ -6,6 +6,7 @@ import '../../location/models/map_place.dart';
 import '../../location/services/maps_service.dart';
 import 'home_header.dart';
 import 'location_card.dart';
+import '../../../shared/maps/rjs_map_markers.dart';
 
 class MapBookingHeader extends StatefulWidget {
   const MapBookingHeader({
@@ -28,17 +29,32 @@ class _MapBookingHeaderState extends State<MapBookingHeader> {
 
   late final Future<MapPlace> _currentPlace;
   GoogleMapController? _mapController;
+  BitmapDescriptor? _pickupPin;
+  late final RjsPickupMarkerPulse _pickupPulse;
 
   @override
   void initState() {
     super.initState();
     _currentPlace = MapsService.currentPlace();
+    _pickupPulse = RjsPickupMarkerPulse((pin) {
+      if (mounted) setState(() => _pickupPin = pin);
+    });
+    _pickupPulse.start();
     _currentPlace.then((place) {
       if (!mounted) return;
-      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
-        LatLng(place.latitude, place.longitude), 15.5,
-      ));
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(place.latitude, place.longitude),
+          15.5,
+        ),
+      );
     }, onError: (Object _) {});
+  }
+
+  @override
+  void dispose() {
+    _pickupPulse.dispose();
+    super.dispose();
   }
 
   @override
@@ -63,9 +79,12 @@ class _MapBookingHeaderState extends State<MapBookingHeader> {
                     _mapController = controller;
                     final current = MapsService.cachedCurrentPlace;
                     if (current != null) {
-                      controller.moveCamera(CameraUpdate.newLatLngZoom(
-                        LatLng(current.latitude, current.longitude), 15.5,
-                      ));
+                      controller.moveCamera(
+                        CameraUpdate.newLatLngZoom(
+                          LatLng(current.latitude, current.longitude),
+                          15.5,
+                        ),
+                      );
                     }
                   },
                   mapId: GoogleMapsConfig.mapId,
@@ -79,9 +98,12 @@ class _MapBookingHeaderState extends State<MapBookingHeader> {
                           Marker(
                             markerId: const MarkerId('current-location'),
                             position: center,
-                            icon: BitmapDescriptor.defaultMarkerWithHue(
-                              BitmapDescriptor.hueAzure,
-                            ),
+                            icon:
+                                _pickupPin ??
+                                BitmapDescriptor.defaultMarkerWithHue(
+                                  BitmapDescriptor.hueAzure,
+                                ),
+                            anchor: const Offset(.5, .87),
                           ),
                         },
                   compassEnabled: false,

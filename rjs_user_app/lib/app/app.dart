@@ -9,11 +9,14 @@ import '../features/about/screens/about_rjs_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/wallet/screens/live_wallet_screen.dart';
 import '../features/saved_places/screens/saved_places_screen.dart';
+import '../core/notifications/customer_push_service.dart';
 
 class RjsApp extends StatelessWidget {
   const RjsApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
+    navigatorKey: CustomerPushService.navigatorKey,
+    scaffoldMessengerKey: CustomerPushService.messengerKey,
     debugShowCheckedModeBanner: false,
     title: 'RJS Rides',
     theme: AppTheme.light,

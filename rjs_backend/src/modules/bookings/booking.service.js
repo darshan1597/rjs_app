@@ -4,6 +4,7 @@ import { Booking } from './booking.model.js';
 import { Payment, Refund } from '../payments/payment.model.js';
 import { assignableBookingStatuses, canAssignBooking } from './assignment-policy.js';
 import { scheduledPickupState } from './scheduled-pickup-policy.js';
+import { sendCustomerBookingPush } from '../customers/customer-push.service.js';
 
 async function listBookings({ page, limit, search, status, serviceType, paymentStatus }) {
   const filter = {};
@@ -66,6 +67,8 @@ async function assignDriver(bookingId, driverId, employeeId, reason) {
   const updated = await Booking.findOneAndUpdate({ _id: bookingId, updatedAt: booking.updatedAt, status: { $in: assignableBookingStatuses } }, { $set: { currentDriverId: driverId, status: 'ASSIGNED' }, $push: { assignments: { driverId, vehicleRegistrationNumber: driver.vehicle.registrationNumber, assignedBy: employeeId, reason, method: 'MANUAL' }, statusHistory: { status: 'ASSIGNED', changedBy: employeeId, note: reason || 'Driver assigned by admin' } } }, { new: true, runValidators: true }).populate('currentDriverId', 'driverCode personal.fullName personal.phone vehicle');
 
   if (!updated) throw new AppError(409, 'BOOKING_CHANGED', 'The booking changed while assigning. Refresh and try again');
+
+  sendCustomerBookingPush(updated, 'ASSIGNED');
 
   return updated;
 }

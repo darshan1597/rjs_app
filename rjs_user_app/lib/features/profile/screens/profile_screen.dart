@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/network/customer_auth_service.dart';
+import '../../../core/notifications/customer_notification_store.dart';
+import '../../../core/notifications/customer_push_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/book_ride_scaffold.dart';
 import '../../../shared/widgets/customer_logout.dart';
 import '../../../shared/widgets/notification_popup.dart';
+import '../../about/screens/about_rjs_screen.dart';
+import '../../auth/screens/login_screen.dart';
+import '../../rides/services/customer_booking_service.dart';
+import '../../support/screens/help_support_screen.dart';
 import 'personal_information_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -17,6 +23,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _customer;
+  Map<String, dynamic>? _bookingSummary;
 
   @override
   void initState() {
@@ -29,6 +36,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted && cached != null) setState(() => _customer = cached);
     final current = await CustomerAuthService.getMe();
     if (mounted && current != null) setState(() => _customer = current);
+    try {
+      final summary = await CustomerBookingService.summary();
+      if (mounted) setState(() => _bookingSummary = summary);
+    } catch (_) {
+      // Profile details remain usable when booking totals cannot be refreshed.
+    }
   }
 
   Future<void> _editPersonalInformation() async {
@@ -65,16 +78,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             sliver: SliverList.list(
               children: [
-                _ProfileHeader(onMenu: () => showRjsDrawer(context)),
+                _ProfileHeader(
+                  onMenu: () => showRjsDrawer(context),
+                  onSettings: _showNotificationPreferences,
+                ),
                 const SizedBox(height: 15),
                 _ProfileCard(customer: _customer),
                 const SizedBox(height: 12),
-                const _BookingsPanel(),
+                _BookingsPanel(summary: _bookingSummary),
                 const SizedBox(height: 12),
                 _SettingsPanel(
                   onPersonalInformation: _editPersonalInformation,
                   onAddresses: () =>
                       Navigator.pushNamed(context, '/saved-places'),
+                  onPaymentMethods: () => _showInfoSheet(
+                    'Payment Methods',
+                    Icons.credit_card_outlined,
+                    'RJS does not store your card or UPI credentials. After a ride, pay securely through Razorpay, the driver QR, or your RJS Wallet.',
+                  ),
+                  onNotifications: () => _showNotificationPreferences(),
+                  onPrivacy: _showPrivacySecurity,
+                  onSupport: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const HelpSupportScreen(),
+                    ),
+                  ),
+                  onAbout: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AboutRjsScreen(),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 const _LogoutButton(),
@@ -85,11 +120,353 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     ),
   );
+
+  Future<void> _showInfoSheet(String title, IconData icon, String message) =>
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: const Color(0xFFEDF4FF),
+                  child: Icon(icon, color: AppColors.blue, size: 28),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.muted, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Future<void> _showNotificationPreferences() async {
+    final current = Map<String, dynamic>.from(
+      _customer?['notificationPreferences'] as Map<String, dynamic>? ??
+          const {},
+    );
+    var push = current['pushEnabled'] != false;
+    var rides = current['rideUpdates'] != false;
+    var offers = current['offers'] != false;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Notification Preferences',
+                  style: TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  title: const Text('Push notifications'),
+                  subtitle: const Text('Allow notifications from RJS'),
+                  value: push,
+                  onChanged: (value) => setSheetState(() {
+                    push = value;
+                    if (!value) {
+                      rides = false;
+                      offers = false;
+                    }
+                  }),
+                ),
+                SwitchListTile(
+                  title: const Text('Ride updates'),
+                  subtitle: const Text(
+                    'Driver assignment, arrival and payment updates',
+                  ),
+                  value: rides,
+                  onChanged: push
+                      ? (value) => setSheetState(() => rides = value)
+                      : null,
+                ),
+                SwitchListTile(
+                  title: const Text('Offers'),
+                  subtitle: const Text('Wallet and promotional updates'),
+                  value: offers,
+                  onChanged: push
+                      ? (value) => setSheetState(() => offers = value)
+                      : null,
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: FilledButton(
+                    onPressed: () async {
+                      try {
+                        final saved =
+                            await CustomerAuthService.updateNotificationPreferences(
+                              pushEnabled: push,
+                              rideUpdates: rides,
+                              offers: offers,
+                            );
+                        await CustomerPushService.applyPreferences({
+                          'pushEnabled': push,
+                        });
+                        if (!mounted) return;
+                        setState(
+                          () => _customer = {
+                            ...?_customer,
+                            'notificationPreferences': saved,
+                          },
+                        );
+                        if (sheetContext.mounted) Navigator.pop(sheetContext);
+                      } catch (error) {
+                        if (sheetContext.mounted) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                error.toString().replaceFirst(
+                                  'Exception: ',
+                                  '',
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.orange,
+                    ),
+                    child: const Text('Save Preferences'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showPrivacySecurity() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 4, 22, 26),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Privacy & Security',
+              style: TextStyle(
+                color: AppColors.navy,
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Your mobile number is verified by OTP. Card and UPI credentials are handled securely by Razorpay and are not stored by RJS.',
+              style: TextStyle(color: AppColors.muted, height: 1.5),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF5F3),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFFFD8D1)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Delete account',
+                          style: TextStyle(
+                            color: AppColors.navy,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Closes your account, signs out every device and removes saved places. Required financial and ride records are retained securely.',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            _confirmDeleteAccount();
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                          ),
+                          child: const Text('Delete my account'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _confirmDeleteAccount() async {
+    final controller = TextEditingController();
+    var deleting = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          icon: const Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.red,
+            size: 38,
+          ),
+          title: const Text(
+            'Permanently delete account?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.navy,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'This cannot be undone. Type DELETE below to confirm.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: controller,
+                textCapitalization: TextCapitalization.characters,
+                enabled: !deleting,
+                onChanged: (_) => setDialogState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'DELETE',
+                  filled: true,
+                  fillColor: const Color(0xFFF7F9FC),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            TextButton(
+              onPressed: deleting
+                  ? null
+                  : () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep account'),
+            ),
+            FilledButton(
+              onPressed: deleting || controller.text.trim() != 'DELETE'
+                  ? null
+                  : () async {
+                      setDialogState(() => deleting = true);
+                      try {
+                        await CustomerAuthService.deleteAccount();
+                        await CustomerPushService.unregisterCurrentDevice();
+                        CustomerNotificationStore.clear();
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext, true);
+                        }
+                      } catch (error) {
+                        setDialogState(() => deleting = false);
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                error.toString().replaceFirst(
+                                  'Exception: ',
+                                  '',
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: Text(deleting ? 'Deleting...' : 'Delete permanently'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (confirmed == true && mounted) {
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (_) => false,
+      );
+    }
+  }
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({required this.onMenu});
+  const _ProfileHeader({required this.onMenu, required this.onSettings});
   final VoidCallback onMenu;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -117,7 +494,7 @@ class _ProfileHeader extends StatelessWidget {
           ],
         ),
       ),
-      const _HeaderIcon(icon: Icons.settings_outlined),
+      _HeaderIcon(icon: Icons.settings_outlined, onTap: onSettings),
       const SizedBox(width: 8),
       _HeaderIcon(
         icon: Icons.notifications_none_rounded,
@@ -159,19 +536,7 @@ class _HeaderIcon extends StatelessWidget {
         children: [
           Icon(icon, color: AppColors.navy, size: 29),
           if (notification)
-            Positioned(
-              right: 7,
-              top: 7,
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: AppColors.orange,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
-                ),
-              ),
-            ),
+            const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
         ],
       ),
     ),
@@ -233,27 +598,6 @@ class _ProfileCard extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned(
-              right: -2,
-              bottom: 5,
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFE0E6EF)),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x18000000), blurRadius: 6),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.photo_camera_outlined,
-                  color: AppColors.navy,
-                  size: 18,
-                ),
-              ),
-            ),
           ],
         ),
         const SizedBox(width: 20),
@@ -307,85 +651,118 @@ class _ContactLine extends StatelessWidget {
 }
 
 class _BookingsPanel extends StatelessWidget {
-  const _BookingsPanel();
-  static const bookings = [
-    (Icons.calendar_month_outlined, 'Upcoming', '3', AppColors.blue),
-    (Icons.directions_car_outlined, 'Completed', '112', Color(0xFF20963A)),
-    (Icons.history_rounded, 'Cancelled', '13', AppColors.orange),
-    (Icons.receipt_long_outlined, 'All Bookings', '128', Color(0xFF923FE1)),
-  ];
+  const _BookingsPanel({required this.summary});
+  final Map<String, dynamic>? summary;
   @override
-  Widget build(BuildContext context) => _Panel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _Title('My Bookings'),
-        const SizedBox(height: 15),
-        Row(
-          children: List.generate(
-            bookings.length,
-            (i) => Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  border: i == bookings.length - 1
-                      ? null
-                      : const Border(
-                          right: BorderSide(color: Color(0xFFE1E6EF)),
+  Widget build(BuildContext context) {
+    final bookings = [
+      (
+        Icons.calendar_month_outlined,
+        'Upcoming',
+        '${summary?['upcoming'] ?? '—'}',
+        AppColors.blue,
+      ),
+      (
+        Icons.directions_car_outlined,
+        'Completed',
+        '${summary?['completed'] ?? '—'}',
+        const Color(0xFF20963A),
+      ),
+      (
+        Icons.history_rounded,
+        'Cancelled',
+        '${summary?['cancelled'] ?? '—'}',
+        AppColors.orange,
+      ),
+      (
+        Icons.receipt_long_outlined,
+        'All Bookings',
+        '${summary?['total'] ?? '—'}',
+        const Color(0xFF923FE1),
+      ),
+    ];
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _Title('My Bookings'),
+          const SizedBox(height: 15),
+          Row(
+            children: List.generate(
+              bookings.length,
+              (i) => Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: i == bookings.length - 1
+                        ? null
+                        : const Border(
+                            right: BorderSide(color: Color(0xFFE1E6EF)),
+                          ),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: bookings[i].$4.withValues(alpha: .09),
+                          shape: BoxShape.circle,
                         ),
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: bookings[i].$4.withValues(alpha: .09),
-                        shape: BoxShape.circle,
+                        child: Icon(
+                          bookings[i].$1,
+                          color: bookings[i].$4,
+                          size: 23,
+                        ),
                       ),
-                      child: Icon(
-                        bookings[i].$1,
-                        color: bookings[i].$4,
-                        size: 23,
+                      const SizedBox(height: 8),
+                      FittedBox(
+                        child: Text(
+                          bookings[i].$2,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 9.5,
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    FittedBox(
-                      child: Text(
-                        bookings[i].$2,
+                      const SizedBox(height: 3),
+                      Text(
+                        bookings[i].$3,
                         style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 9.5,
+                          color: AppColors.navy,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      bookings[i].$3,
-                      style: const TextStyle(
-                        color: AppColors.navy,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _SettingsPanel extends StatelessWidget {
   const _SettingsPanel({
     required this.onPersonalInformation,
     required this.onAddresses,
+    required this.onPaymentMethods,
+    required this.onNotifications,
+    required this.onPrivacy,
+    required this.onSupport,
+    required this.onAbout,
   });
 
   final VoidCallback onPersonalInformation;
   final VoidCallback onAddresses;
+  final VoidCallback onPaymentMethods;
+  final VoidCallback onNotifications;
+  final VoidCallback onPrivacy;
+  final VoidCallback onSupport;
+  final VoidCallback onAbout;
   static const items = [
     (
       Icons.person_outline_rounded,
@@ -422,11 +799,16 @@ class _SettingsPanel extends StatelessWidget {
         ...List.generate(
           items.length,
           (i) => InkWell(
-            onTap: i == 0
-                ? onPersonalInformation
-                : i == 2
-                ? onAddresses
-                : null,
+            onTap: switch (i) {
+              0 => onPersonalInformation,
+              1 => onPaymentMethods,
+              2 => onAddresses,
+              3 => onNotifications,
+              4 => onPrivacy,
+              5 => onSupport,
+              6 => onAbout,
+              _ => null,
+            },
             borderRadius: BorderRadius.circular(10),
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 9),

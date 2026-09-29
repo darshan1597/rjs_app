@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "43629036550",
+    "project_id": "rjs1-22189",
+    "storage_bucket": "rjs1-22189.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:43629036550:android:7c6e1240f15121cd7c6f87",
+        "android_client_info": {
+          "package_name": "com.rjstours.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9bninE00uXqLmq-_I3VORGRtSdbMMwsg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:43629036550:android:d96bbd8d125f4b717c6f87",
+        "android_client_info": {
+          "package_name": "com.rjstours.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9bninE00uXqLmq-_I3VORGRtSdbMMwsg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

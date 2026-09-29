@@ -12,6 +12,7 @@ import {
     verifyCustomerRefreshToken,
 } from "../../common/security/tokens.js";
 import { Customer, CustomerOtp, CustomerSession } from "./customer.model.js";
+import { deleteCustomerAccount } from './customer-account.service.js';
 import { authenticateCustomer } from "./customer-auth.middleware.js";
 import { createOtpLimiters } from '../../common/middleware/rate-limits.js';
 
@@ -47,6 +48,20 @@ const updateProfileSchema = z.object({
     params: empty,
     query: empty,
 });
+const notificationPreferencesSchema = z.object({
+    body: z.object({
+        pushEnabled: z.boolean(),
+        rideUpdates: z.boolean(),
+        offers: z.boolean(),
+    }),
+    params: empty,
+    query: empty,
+});
+const deleteAccountSchema = z.object({
+    body: z.object({ confirmation: z.literal('DELETE') }),
+    params: z.object({}),
+    query: z.object({}),
+});
 const refreshSchema = z.object({
     body: z.object({ refreshToken: z.string().min(20) }),
     params: empty,
@@ -74,6 +89,7 @@ async function createSession(customer, req) {
             phone: customer.phone,
             name: customer.name,
             email: customer.email,
+            notificationPreferences: customer.notificationPreferences,
         },
         tokens: {
             accessToken: signCustomerAccessToken(customer, session.id),
@@ -243,6 +259,7 @@ router.post("/refresh", validate(refreshSchema), async (req, res, next) => {
                     phone: customer.phone,
                     name: customer.name,
                     email: customer.email,
+                    notificationPreferences: customer.notificationPreferences,
                 },
                 tokens: {
                     accessToken: signCustomerAccessToken(customer, session.id),
@@ -282,6 +299,7 @@ router.get("/me", authenticateCustomer, (req, res) =>
                 phone: req.customer.phone,
                 name: req.customer.name,
                 email: req.customer.email,
+                notificationPreferences: req.customer.notificationPreferences,
             },
         },
     }),
@@ -305,11 +323,34 @@ router.patch("/me", authenticateCustomer, validate(updateProfileSchema), async (
                     phone: req.customer.phone,
                     name: req.customer.name,
                     email: req.customer.email,
+                    notificationPreferences: req.customer.notificationPreferences,
                 },
             },
         });
     } catch (e) {
         return next(e);
+    }
+});
+
+router.patch("/notification-preferences", authenticateCustomer, validate(notificationPreferencesSchema), async (req, res, next) => {
+    try {
+        req.customer.notificationPreferences = req.validated.body;
+        await req.customer.save();
+        return res.json({
+            success: true,
+            data: { preferences: req.customer.notificationPreferences },
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.delete('/me', authenticateCustomer, validate(deleteAccountSchema), async (req, res, next) => {
+    try {
+        const result = await deleteCustomerAccount(req.customer);
+        return res.json({ success: true, data: result });
+    } catch (error) {
+        return next(error);
     }
 });
 

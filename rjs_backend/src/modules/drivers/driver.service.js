@@ -5,6 +5,7 @@ import { DriverPayout } from '../payments/payment.model.js';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 import { VehicleCategory, VehicleVariant } from '../vehicles/vehicle.model.js';
+import { SupportTicket } from '../support/support-ticket.model.js';
 
 async function listDrivers({ page, limit, search, status, vehicleType }) {
   const filter = {};
@@ -72,16 +73,44 @@ async function getDriverDetails(driverId) {
 
   if (!driver) throw new AppError(404, 'DRIVER_NOT_FOUND', 'Driver was not found');
   
-  const [bookings, payoutSummary] = await Promise.all([
+  const [bookings, payoutSummary, profileChangeRequests] = await Promise.all([
     Booking.find({ currentDriverId: driverId }).sort({ scheduledStartAt: -1 }).limit(12).select('bookingNumber serviceType pickup destination packageName scheduledStartAt scheduledEndAt status passengerCount').lean(),
     DriverPayout.aggregate([{ $match: { driverId: driver._id } }, { $group: { _id: null, totalPaid: { $sum: { $cond: [{ $eq: ['$status', 'PAID'] }, '$netPayout', 0] } }, pendingPayout: { $sum: { $cond: [{ $in: ['$status', ['PENDING', 'PROCESSING']] }, '$netPayout', 0] } }, completedTrips: { $sum: '$completedTrips' } } }]),
+    SupportTicket.find({ driverId: driver._id, profileChangeArea: { $exists: true } }).sort({ createdAt: -1 }).limit(20).lean(),
   ]);
   return {
     ...driver,
     bank: { accountHolderName: driver.bank?.accountHolderName, accountNumber: `••••${driver.bank?.accountNumber?.slice(-4) || ''}`, ifscCode: driver.bank?.ifscCode, upiId: driver.bank?.upiId, proofFileName: driver.bank?.proofFileName, proofUrl: driver.bank?.proofUrl },
     bookings,
     earnings: payoutSummary[0] || { totalPaid: 0, pendingPayout: 0, completedTrips: 0 },
+    profileChangeRequests,
   };
 }
 
-export { createDriver, getDriverDetails, listDrivers, updateDriverStatus };
+async function reviewDriverChange(driverId, requestId, data, adminId) {
+  const request = await SupportTicket.findOne({ _id: requestId, driverId, profileChangeArea: { $exists: true }, reviewDecision: { $exists: false } });
+  if (!request) throw new AppError(404, 'PROFILE_CHANGE_REQUEST_NOT_FOUND', 'Pending profile change request was not found');
+  if (data.decision === 'APPROVED') {
+    const updates = data.updates || {};
+    const set = {};
+    const area = request.profileChangeArea;
+    if (area === 'PERSONAL' && updates.personal) for (const [key, value] of Object.entries(updates.personal)) set[`personal.${key}`] = value;
+    if (area === 'BANK' && updates.bank) for (const [key, value] of Object.entries(updates.bank)) set[`bank.${key}`] = value;
+    if (area === 'VEHICLE' && updates.vehicle) for (const [key, value] of Object.entries(updates.vehicle)) set[`vehicle.${key}`] = value;
+    if (area === 'PHOTO' && updates.profilePhoto) set['personal.profilePhoto'] = updates.profilePhoto;
+    if (area === 'DOCUMENTS' && updates.documents) set.documents = updates.documents;
+    if (!Object.keys(set).length) throw new AppError(422, 'PROFILE_CHANGE_VALUES_REQUIRED', 'Enter the approved replacement values before approving');
+    const driver = await Driver.findByIdAndUpdate(driverId, { $set: set }, { new: true, runValidators: true });
+    if (!driver) throw new AppError(404, 'DRIVER_NOT_FOUND', 'Driver was not found');
+  }
+  request.reviewDecision = data.decision;
+  request.reviewNote = data.note;
+  request.reviewedAt = new Date();
+  request.reviewedBy = adminId;
+  request.status = data.decision === 'APPROVED' ? 'RESOLVED' : 'CLOSED';
+  request.messages.push({ senderType: 'EMPLOYEE', text: data.note });
+  await request.save();
+  return request;
+}
+
+export { createDriver, getDriverDetails, listDrivers, reviewDriverChange, updateDriverStatus };

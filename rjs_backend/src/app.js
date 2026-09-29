@@ -23,6 +23,7 @@ import { supportRouter } from './modules/support/support.routes.js';
 import { customerAuthRouter } from './modules/customers/customer-auth.routes.js';
 import { customerAddressRouter } from './modules/customers/customer-address.routes.js';
 import { customerBookingRouter } from './modules/customers/customer-booking.routes.js';
+import { customerNotificationRouter } from './modules/customers/customer-notification.routes.js';
 import { driverAuthRouter } from './modules/drivers/driver-auth.routes.js';
 import { driverTripRouter } from './modules/drivers/driver-trip.routes.js';
 import { driverReminderRouter } from './modules/drivers/driver-reminder.routes.js';
@@ -92,6 +93,7 @@ function createApp() {
   app.use('/api/v1/customer/auth', customerAuthRouter);
   app.use('/api/v1/customer/addresses', customerAddressRouter);
   app.use('/api/v1/customer/bookings', customerBookingRouter);
+  app.use('/api/v1/customer/notifications', customerNotificationRouter);
   app.use('/api/v1/customer/wallet', customerWalletRouter);
   app.use('/api/v1/customer/maps', customerMapRouter);
   app.use('/api/v1/driver/auth', driverAuthRouter);

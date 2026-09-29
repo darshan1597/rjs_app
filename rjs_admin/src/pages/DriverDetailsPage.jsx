@@ -90,6 +90,47 @@ function FileItem({ label, fileName, url }) {
         </div>
     );
 }
+function ChangeReviewDialog({ request, driverId, onClose, onDone }) {
+    const [decision, setDecision] = useState("REJECTED");
+    const [note, setNote] = useState("");
+    const [updates, setUpdates] = useState("");
+    const [error, setError] = useState("");
+    const [saving, setSaving] = useState(false);
+    if (!request) return null;
+    async function submit() {
+        setError("");
+        let parsed;
+        if (decision === "APPROVED") {
+            try { parsed = JSON.parse(updates); } catch { setError("Replacement values must be valid JSON."); return; }
+        }
+        setSaving(true);
+        try {
+            await patch(`/admin/drivers/${driverId}/change-requests/${request._id}/review`, { decision, note, ...(parsed && { updates: parsed }) });
+            await onDone();
+        } catch (e) { setError(e.message); } finally { setSaving(false); }
+    }
+    const example = {
+        PERSONAL: '{"personal":{"email":"driver@example.com"}}',
+        BANK: '{"bank":{"accountHolderName":"Name","accountNumber":"123456789","ifscCode":"BANK0001234"}}',
+        VEHICLE: '{"vehicle":{"manufacturer":"Toyota","model":"Etios","color":"White"}}',
+        PHOTO: '{"profilePhoto":"/api/v1/media/driver-files/file.jpg"}',
+        DOCUMENTS: '{"documents":[{"name":"Aadhaar","fileName":"aadhaar.pdf","url":"/api/v1/media/driver-files/file.pdf"}]}',
+    }[request.profileChangeArea];
+    return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+        <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-black">Review profile correction</h3>
+            <p className="mt-1 text-[10px] font-bold text-blue-600">{request.profileChangeArea} · {request.ticketNumber}</p>
+            <p className="mt-4 rounded-xl bg-slate-50 p-4 text-[11px] text-slate-700">{request.messages?.[0]?.text}</p>
+            <div className="mt-4 flex gap-2">
+                {['REJECTED','APPROVED'].map(x=><button key={x} onClick={()=>setDecision(x)} className={`rounded-lg px-4 py-2 text-[9px] font-black ${decision===x ? x==='APPROVED'?'bg-emerald-600 text-white':'bg-red-600 text-white':'bg-slate-100'}`}>{x}</button>)}
+            </div>
+            {decision === 'APPROVED' && <textarea value={updates} onChange={e=>setUpdates(e.target.value)} className="mt-4 h-28 w-full rounded-xl border p-3 font-mono text-[9px]" placeholder={example} />}
+            <textarea value={note} onChange={e=>setNote(e.target.value)} className="mt-3 h-20 w-full rounded-xl border p-3 text-[10px]" placeholder="Required review note" />
+            {error && <p className="mt-2 text-[9px] font-bold text-red-600">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} disabled={saving} className="rounded-xl px-4 py-2 text-[10px] font-bold">Cancel</button><button onClick={submit} disabled={saving || note.trim().length < 2 || (decision==='APPROVED' && !updates.trim())} className="rounded-xl bg-blue-600 px-4 py-2 text-[10px] font-bold text-white disabled:opacity-40">{saving?'Saving...':'Submit review'}</button></div>
+        </div>
+    </div>;
+}
 export default function DriverDetailsPage() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -98,6 +139,7 @@ export default function DriverDetailsPage() {
     const [error, setError] = useState("");
     const [confirm, setConfirm] = useState(false);
     const [acting, setActing] = useState(false);
+    const [reviewRequest, setReviewRequest] = useState(null);
     async function load() {
         setLoading(true);
         try {
@@ -348,6 +390,16 @@ export default function DriverDetailsPage() {
                                 />
                             </div>
                         </Panel>
+                        <Panel title="Profile correction requests" icon={LuFileText}>
+                            <div className="space-y-3">
+                                {(driver.profileChangeRequests || []).length === 0 ? <p className="text-[9px] text-slate-400">No correction requests.</p> : driver.profileChangeRequests.map(request => <div key={request._id} className="rounded-xl border border-slate-200 p-3">
+                                    <div className="flex items-center justify-between gap-2"><b className="text-[9px]">{request.profileChangeArea}</b><span className={`rounded-full px-2 py-1 text-[7px] font-black ${request.reviewDecision==='APPROVED'?'bg-emerald-50 text-emerald-700':request.reviewDecision==='REJECTED'?'bg-red-50 text-red-600':'bg-amber-50 text-amber-700'}`}>{request.reviewDecision || 'PENDING'}</span></div>
+                                    <p className="mt-2 line-clamp-3 text-[9px] text-slate-600">{request.messages?.[0]?.text}</p>
+                                    {!request.reviewDecision && <button onClick={()=>setReviewRequest(request)} className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-[8px] font-black text-blue-600">Review</button>}
+                                    {request.reviewNote && <p className="mt-2 text-[8px] text-slate-400">Review: {request.reviewNote}</p>}
+                                </div>)}
+                            </div>
+                        </Panel>
                         <Panel title="Bank details" icon={LuBanknote}>
                             <div className="space-y-3">
                                 <Item
@@ -409,6 +461,7 @@ export default function DriverDetailsPage() {
                     onCancel={() => setConfirm(false)}
                     onConfirm={changeStatus}
                 />
+                <ChangeReviewDialog request={reviewRequest} driverId={id} onClose={()=>setReviewRequest(null)} onDone={async()=>{setReviewRequest(null); await load();}} />
             </main>
         </AdminLayout>
     );

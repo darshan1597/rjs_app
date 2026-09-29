@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -21,16 +23,65 @@ class DriverProfileScreen extends StatefulWidget {
 
 class _DriverProfileScreenState extends State<DriverProfileScreen> {
   bool _isOnline = true;
+  bool _changingAvailability = false;
   bool _loggingOut = false;
   Map<String, dynamic>? _driver;
+  Map<String, dynamic>? _performance;
 
   @override
   void initState() {
     super.initState();
-    DriverApiService.session().then((session) {
+    unawaited(_loadProfile());
+  }
+
+  Future<void> _loadProfile() async {
+    final session = await DriverApiService.session();
+    final cached = session?['driver'] as Map<String, dynamic>?;
+    if (mounted && _driver == null && cached != null) {
+      setState(() {
+        _driver = cached;
+        _isOnline = cached['operationalStatus'] != 'OFFLINE';
+      });
+    }
+    try {
+      final results = await Future.wait([
+        DriverApiService.profile(),
+        DriverApiService.profileSummary(),
+      ]);
       if (!mounted) return;
-      setState(() => _driver = session?['driver'] as Map<String, dynamic>?);
-    });
+      final driver = results[0]['driver'] as Map<String, dynamic>?;
+      setState(() {
+        _driver = driver;
+        _performance = results[1];
+        _isOnline = driver?['operationalStatus'] != 'OFFLINE';
+      });
+    } catch (error) {
+      if (!mounted || cached != null) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _setAvailability() async {
+    if (_changingAvailability) return;
+    final requested = !_isOnline;
+    setState(() => _changingAvailability = true);
+    try {
+      await DriverApiService.setOnline(requested);
+      if (!mounted) return;
+      setState(() {
+        _isOnline = requested;
+        if (_driver != null) {
+          _driver!['operationalStatus'] = requested ? 'ONLINE' : 'OFFLINE';
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _changingAvailability = false);
+    }
   }
 
   Future<void> _logout() async {
@@ -107,46 +158,60 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       backgroundColor: AppColors.background,
       body: SafeArea(
         bottom: false,
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-            const SliverPadding(
-              padding: EdgeInsets.fromLTRB(18, 8, 17, 15),
-              sliver: SliverToBoxAdapter(child: _ProfileHeader()),
+        child: RefreshIndicator(
+          onRefresh: _loadProfile,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
             ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                15,
-                0,
-                15,
-                20 + MediaQuery.paddingOf(context).bottom,
+            slivers: [
+              const SliverPadding(
+                padding: EdgeInsets.fromLTRB(18, 8, 17, 15),
+                sliver: SliverToBoxAdapter(child: _ProfileHeader()),
               ),
-              sliver: SliverList.list(
-                children: [
-                  DriverIdentityCard(driver: _driver),
-                  const SizedBox(height: 11),
-                  DriverVehicleCard(
-                    vehicle: _driver?['vehicle'] as Map<String, dynamic>?,
-                  ),
-                  const SizedBox(height: 11),
-                  const PerformanceCard(),
-                  const SizedBox(height: 11),
-                  const ProfileMenuCard(),
-                  const SizedBox(height: 11),
-                  const ContactSupportCard(),
-                  const SizedBox(height: 11),
-                  LogoutCard(onTap: _loggingOut ? null : _logout),
-                ],
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  15,
+                  0,
+                  15,
+                  20 + MediaQuery.paddingOf(context).bottom,
+                ),
+                sliver: SliverList.list(
+                  children: [
+                    DriverIdentityCard(
+                      driver: _driver,
+                      totalTrips: (_performance?['totalTrips'] as num?)
+                          ?.toInt(),
+                      averageRating: _performance?['averageRating'] as num?,
+                    ),
+                    const SizedBox(height: 11),
+                    DriverVehicleCard(
+                      vehicle: _driver?['vehicle'] as Map<String, dynamic>?,
+                    ),
+                    const SizedBox(height: 11),
+                    PerformanceCard(
+                      data: _performance?['thisMonth'] as Map<String, dynamic>?,
+                    ),
+                    const SizedBox(height: 11),
+                    ProfileMenuCard(driver: _driver),
+                    const SizedBox(height: 11),
+                    const ContactSupportCard(),
+                    const SizedBox(height: 11),
+                    LogoutCard(onTap: _loggingOut ? null : _logout),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: DriverBottomBar(
         selectedIndex: 4,
         isOnline: _isOnline,
         onSelected: _selectTab,
-        onStatusTap: () => setState(() => _isOnline = !_isOnline),
+        onStatusTap: _changingAvailability
+            ? () {}
+            : () => unawaited(_setAvailability()),
       ),
     ),
   );
@@ -156,9 +221,9 @@ class _ProfileHeader extends StatelessWidget {
   const _ProfileHeader();
 
   @override
-  Widget build(BuildContext context) => const Row(
+  Widget build(BuildContext context) => Row(
     children: [
-      Expanded(
+      const Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -178,7 +243,7 @@ class _ProfileHeader extends StatelessWidget {
           ],
         ),
       ),
-      DriverHeaderActions(secondIcon: Icons.settings_outlined),
+      DriverHeaderActions(showSecondAction: false),
     ],
   );
 }

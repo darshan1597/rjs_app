@@ -12,15 +12,14 @@ import '../../location/services/maps_service.dart';
 import '../services/customer_booking_service.dart';
 import '../../wallet/services/wallet_service.dart';
 import '../../bookings/widgets/late_pickup_cancel_dialog.dart';
+import '../../../shared/maps/rjs_map_markers.dart';
 
 Widget _vehicleImage(String source) => source.startsWith('http')
     ? Image.network(
         source,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const Icon(
-          Icons.directions_car_rounded,
-          color: AppColors.muted,
-        ),
+        errorBuilder: (_, __, ___) =>
+            const Icon(Icons.directions_car_rounded, color: AppColors.muted),
       )
     : Image.asset(source, fit: BoxFit.contain);
 
@@ -61,6 +60,9 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   int? _pickupEtaMinutes;
   bool _routeRefreshInFlight = false;
   BitmapDescriptor? _driverCarIcon;
+  BitmapDescriptor? _pickupPin;
+  BitmapDescriptor? _destinationPin;
+  late final RjsPickupMarkerPulse _pickupPulse;
   late final Razorpay _razorpay;
 
   List<String> get _messages => [
@@ -76,6 +78,11 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     WidgetsBinding.instance.addObserver(this);
     _booking = widget.booking;
     _loadDriverCarIcon();
+    _pickupPulse = RjsPickupMarkerPulse((pin) {
+      if (mounted) setState(() => _pickupPin = pin);
+    });
+    _pickupPulse.start();
+    _loadMapPins();
     _razorpay = Razorpay()
       ..on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess)
       ..on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
@@ -104,6 +111,7 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     _searchProgress.dispose();
     _messageTimer?.cancel();
     _poller?.cancel();
+    _pickupPulse.dispose();
     _razorpay.clear();
     super.dispose();
   }
@@ -158,13 +166,24 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
           _searchProgress.stop();
           _messageTimer?.cancel();
         }
-        if (const {'COMPLETED', 'CANCELLED', 'NO_DRIVER_AVAILABLE', 'NO_SHOW'}.contains(status)) {
+        if (const {
+          'COMPLETED',
+          'CANCELLED',
+          'NO_DRIVER_AVAILABLE',
+          'NO_SHOW',
+        }.contains(status)) {
           _poller?.cancel();
         }
         if (status == 'NO_SHOW') {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Driver reported customer no-show. Contact RJS support if this is incorrect.')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Driver reported customer no-show. Contact RJS support if this is incorrect.',
+                ),
+              ),
+            );
             Navigator.of(context).pop();
           });
         }
@@ -186,15 +205,23 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     if (mounted) setState(() => _driverCarIcon = icon);
   }
 
+  Future<void> _loadMapPins() async {
+    final pin = await RjsMapMarkers.destination();
+    if (mounted) setState(() => _destinationPin = pin);
+  }
+
   double _metresBetween(LatLng first, LatLng second) {
     const earthRadius = 6371000.0;
     final latitudeDelta = (second.latitude - first.latitude) * math.pi / 180;
     final longitudeDelta = (second.longitude - first.longitude) * math.pi / 180;
     final firstLatitude = first.latitude * math.pi / 180;
     final secondLatitude = second.latitude * math.pi / 180;
-    final value = math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
-        math.cos(firstLatitude) * math.cos(secondLatitude) *
-            math.sin(longitudeDelta / 2) * math.sin(longitudeDelta / 2);
+    final value =
+        math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
+        math.cos(firstLatitude) *
+            math.cos(secondLatitude) *
+            math.sin(longitudeDelta / 2) *
+            math.sin(longitudeDelta / 2);
     return earthRadius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value));
   }
 
@@ -204,20 +231,34 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     final driver = _pointFrom((_booking['driver'] as Map?)?['currentLocation']);
     if (pickup == null || driver == null) return;
     final now = DateTime.now();
-    if (_lastRouteRefresh != null && now.difference(_lastRouteRefresh!).inSeconds < 15) return;
+    if (_lastRouteRefresh != null &&
+        now.difference(_lastRouteRefresh!).inSeconds < 15)
+      return;
     if (_lastRoutedDriverPoint != null &&
         _metresBetween(_lastRoutedDriverPoint!, driver) < 50 &&
-        _lastRouteRefresh != null && now.difference(_lastRouteRefresh!).inSeconds < 45) return;
+        _lastRouteRefresh != null &&
+        now.difference(_lastRouteRefresh!).inSeconds < 45)
+      return;
     _routeRefreshInFlight = true;
     _lastRouteRefresh = now;
     try {
       final route = await MapsService.route(
-        origin: MapPlace(address: 'Driver location', latitude: driver.latitude, longitude: driver.longitude),
-        destination: MapPlace(address: 'Pickup', latitude: pickup.latitude, longitude: pickup.longitude),
+        origin: MapPlace(
+          address: 'Driver location',
+          latitude: driver.latitude,
+          longitude: driver.longitude,
+        ),
+        destination: MapPlace(
+          address: 'Pickup',
+          latitude: pickup.latitude,
+          longitude: pickup.longitude,
+        ),
       );
       if (!mounted || _status != 'DRIVER_EN_ROUTE') return;
       setState(() {
-        _pickupRoutePoints = _decodePolyline(route['encodedPolyline']?.toString() ?? '');
+        _pickupRoutePoints = _decodePolyline(
+          route['encodedPolyline']?.toString() ?? '',
+        );
         _pickupEtaMinutes = (route['durationMinutes'] as num?)?.ceil();
         _lastRoutedDriverPoint = driver;
       });
@@ -258,8 +299,14 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   }
 
   LatLng? _pointFrom(dynamic value) {
-    if (value is! Map || value['latitude'] is! num || value['longitude'] is! num) return null;
-    return LatLng((value['latitude'] as num).toDouble(), (value['longitude'] as num).toDouble());
+    if (value is! Map ||
+        value['latitude'] is! num ||
+        value['longitude'] is! num)
+      return null;
+    return LatLng(
+      (value['latitude'] as num).toDouble(),
+      (value['longitude'] as num).toDouble(),
+    );
   }
 
   Future<void> _frameLiveDriver({bool force = false}) async {
@@ -269,7 +316,8 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     if (controller == null || pickup == null || driver == null) return;
     final previous = _lastFramedDriverPoint;
     if (!force && previous != null) {
-      final moved = (previous.latitude - driver.latitude).abs() +
+      final moved =
+          (previous.latitude - driver.latitude).abs() +
           (previous.longitude - driver.longitude).abs();
       if (moved < 0.00008) return;
     }
@@ -308,7 +356,9 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
       );
       return;
     }
@@ -327,45 +377,57 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
   }
 
   Future<void> _cancel() async {
-    final isConfirmed = const {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(_status);
+    final isConfirmed = const {
+      'ASSIGNED',
+      'DRIVER_ACCEPTED',
+      'DRIVER_EN_ROUTE',
+    }.contains(_status);
     String? reason;
     if (isConfirmed) {
       if (_booking['canCancelLatePickup'] != true) return;
       reason = await chooseLatePickupCancelReason(context);
       if (reason == null) return;
     } else {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Cancel ride search?',
-          style: TextStyle(color: AppColors.navy, fontWeight: FontWeight.w900),
-        ),
-        content: const Text(
-          'We’ll stop notifying nearby drivers for this ride.',
-          style: TextStyle(color: AppColors.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep Searching'),
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Cancel Ride'),
+          title: const Text(
+            'Cancel ride search?',
+            style: TextStyle(
+              color: AppColors.navy,
+              fontWeight: FontWeight.w900,
+            ),
           ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+          content: const Text(
+            'We’ll stop notifying nearby drivers for this ride.',
+            style: TextStyle(color: AppColors.muted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Searching'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Cancel Ride'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
     }
     if (!mounted) return;
     setState(() => _cancelling = true);
     try {
-      final cancelled = await CustomerBookingService.cancel(_bookingId, reason: reason);
+      final cancelled = await CustomerBookingService.cancel(
+        _bookingId,
+        reason: reason,
+      );
       if (mounted) {
         setState(() => _booking = cancelled);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -427,7 +489,9 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', '')),
+          ),
         );
       }
     } finally {
@@ -441,31 +505,66 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     try {
       final quote = await WalletService.quote(_bookingId);
       if (!mounted) return;
-      if (quote['available'] != true) throw Exception('Razorpay checkout or driver QR has already started. Please complete that payment.');
+      if (quote['available'] != true)
+        throw Exception(
+          'Razorpay checkout or driver QR has already started. Please complete that payment.',
+        );
       final payable = (quote['payablePaise'] as num).toInt();
       final balance = (quote['balancePaise'] as num).toInt();
       if (balance < payable) {
-        final addMoney = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-          title: const Text('Insufficient wallet balance'),
-          content: Text('Balance: ₹${(balance / 100).toStringAsFixed(2)}\nPayable after 5% discount: ₹${(payable / 100).toStringAsFixed(2)}'),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add money'))],
-        ));
-        if (mounted && addMoney == true) await Navigator.pushNamed(context, '/wallet');
+        final addMoney = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Insufficient wallet balance'),
+            content: Text(
+              'Balance: ₹${(balance / 100).toStringAsFixed(2)}\nPayable after 5% discount: ₹${(payable / 100).toStringAsFixed(2)}',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Add money'),
+              ),
+            ],
+          ),
+        );
+        if (mounted && addMoney == true)
+          await Navigator.pushNamed(context, '/wallet');
         return;
       }
-      final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-        title: const Text('Pay with RJS Wallet'),
-        content: Text('Ride bill: ₹${((quote['grossPaise'] as num) / 100).toStringAsFixed(2)}\n5% discount: ₹${((quote['discountPaise'] as num) / 100).toStringAsFixed(2)}\nPay: ₹${(payable / 100).toStringAsFixed(2)}'),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Pay now'))],
-      ));
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Pay with RJS Wallet'),
+          content: Text(
+            'Ride bill: ₹${((quote['grossPaise'] as num) / 100).toStringAsFixed(2)}\n5% discount: ₹${((quote['discountPaise'] as num) / 100).toStringAsFixed(2)}\nPay: ₹${(payable / 100).toStringAsFixed(2)}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Pay now'),
+            ),
+          ],
+        ),
+      );
       if (confirmed != true) return;
       await WalletService.pay(_bookingId);
       final booking = await CustomerBookingService.getById(_bookingId);
       if (mounted) setState(() => _booking = booking);
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', '')),
+          ),
+        );
     } finally {
       if (mounted) setState(() => _paying = false);
     }
@@ -493,19 +592,33 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
     final destination = _booking['destination'] as Map<String, dynamic>?;
     final driver = _booking['driver'] as Map<String, dynamic>?;
     final driverLocation = driver?['currentLocation'] as Map<String, dynamic>?;
-    final pickupPoint = pickup?['latitude'] is num && pickup?['longitude'] is num
-        ? LatLng((pickup!['latitude'] as num).toDouble(), (pickup['longitude'] as num).toDouble())
+    final pickupPoint =
+        pickup?['latitude'] is num && pickup?['longitude'] is num
+        ? LatLng(
+            (pickup!['latitude'] as num).toDouble(),
+            (pickup['longitude'] as num).toDouble(),
+          )
         : null;
-    final destinationPoint = destination?['latitude'] is num && destination?['longitude'] is num
-        ? LatLng((destination!['latitude'] as num).toDouble(), (destination['longitude'] as num).toDouble())
+    final destinationPoint =
+        destination?['latitude'] is num && destination?['longitude'] is num
+        ? LatLng(
+            (destination!['latitude'] as num).toDouble(),
+            (destination['longitude'] as num).toDouble(),
+          )
         : null;
-    final driverPoint = driverLocation?['latitude'] is num && driverLocation?['longitude'] is num
-        ? LatLng((driverLocation!['latitude'] as num).toDouble(), (driverLocation['longitude'] as num).toDouble())
+    final driverPoint =
+        driverLocation?['latitude'] is num &&
+            driverLocation?['longitude'] is num
+        ? LatLng(
+            (driverLocation!['latitude'] as num).toDouble(),
+            (driverLocation['longitude'] as num).toDouble(),
+          )
         : null;
     return PopScope(
       canPop: _accepted || const {'NO_SHOW', 'CANCELLED'}.contains(_status),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && !const {'NO_SHOW', 'CANCELLED'}.contains(_status)) _cancel();
+        if (!didPop && !const {'NO_SHOW', 'CANCELLED'}.contains(_status))
+          _cancel();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F8FC),
@@ -518,14 +631,20 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                   children: [
                     Positioned.fill(
                       child: pickupPoint == null
-                          ? Image.asset('assets/images/home-map-placeholder.png', fit: BoxFit.cover)
+                          ? Image.asset(
+                              'assets/images/home-map-placeholder.png',
+                              fit: BoxFit.cover,
+                            )
                           : GoogleMap(
                               mapId: GoogleMapsConfig.mapId,
                               onMapCreated: (controller) {
                                 _liveMapController = controller;
                                 unawaited(_frameLiveDriver(force: true));
                               },
-                              initialCameraPosition: CameraPosition(target: driverPoint ?? pickupPoint, zoom: 15),
+                              initialCameraPosition: CameraPosition(
+                                target: driverPoint ?? pickupPoint,
+                                zoom: 15,
+                              ),
                               myLocationButtonEnabled: false,
                               zoomControlsEnabled: false,
                               mapToolbarEnabled: false,
@@ -533,28 +652,51 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                                 Marker(
                                   markerId: const MarkerId('pickup'),
                                   position: pickupPoint,
-                                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                                  icon:
+                                      _pickupPin ??
+                                      BitmapDescriptor.defaultMarkerWithHue(
+                                        BitmapDescriptor.hueAzure,
+                                      ),
+                                  anchor: const Offset(.5, .87),
                                 ),
-                                if (destinationPoint != null && _status != 'DRIVER_EN_ROUTE')
+                                if (destinationPoint != null &&
+                                    _status != 'DRIVER_EN_ROUTE')
                                   Marker(
                                     markerId: const MarkerId('destination'),
                                     position: destinationPoint,
-                                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+                                    icon:
+                                        _destinationPin ??
+                                        BitmapDescriptor.defaultMarkerWithHue(
+                                          BitmapDescriptor.hueOrange,
+                                        ),
+                                    anchor: const Offset(.5, .87),
                                   ),
                                 if (driverPoint != null)
                                   Marker(
                                     markerId: const MarkerId('driver-live'),
                                     position: driverPoint,
-                                    icon: _driverCarIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                                    rotation: (driverLocation?['heading'] as num?)?.toDouble() ?? 0,
+                                    icon:
+                                        _driverCarIcon ??
+                                        BitmapDescriptor.defaultMarkerWithHue(
+                                          BitmapDescriptor.hueGreen,
+                                        ),
+                                    rotation:
+                                        (driverLocation?['heading'] as num?)
+                                            ?.toDouble() ??
+                                        0,
                                     flat: true,
-                                    infoWindow: const InfoWindow(title: 'Your driver'),
+                                    infoWindow: const InfoWindow(
+                                      title: 'Your driver',
+                                    ),
                                   ),
                               },
                               polylines: {
-                                if (_status == 'DRIVER_EN_ROUTE' && _pickupRoutePoints.isNotEmpty)
+                                if (_status == 'DRIVER_EN_ROUTE' &&
+                                    _pickupRoutePoints.isNotEmpty)
                                   Polyline(
-                                    polylineId: const PolylineId('driver-to-pickup'),
+                                    polylineId: const PolylineId(
+                                      'driver-to-pickup',
+                                    ),
                                     points: _pickupRoutePoints,
                                     color: AppColors.blue,
                                     width: 6,
@@ -585,77 +727,89 @@ class _DriverSearchScreenState extends State<DriverSearchScreen>
                         ],
                       ),
                     ),
-                    if (_status == 'DRIVER_EN_ROUTE' && _pickupEtaMinutes != null)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 118,
-                      child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: AppColors.navy,
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: const [BoxShadow(color: Color(0x330A244A), blurRadius: 12)],
-                        ),
-                        child: Text(
-                          '$_pickupEtaMinutes min',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
+                    if (_status == 'DRIVER_EN_ROUTE' &&
+                        _pickupEtaMinutes != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 118,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 15,
+                              vertical: 9,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.navy,
+                              borderRadius: BorderRadius.circular(22),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x330A244A),
+                                  blurRadius: 12,
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              '$_pickupEtaMinutes min',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                      ),
-                    ),
-                    if (!_accepted) Positioned.fill(
-                      child: AnimatedBuilder(
-                        animation: _searchProgress,
-                        builder: (context, _) {
-                          final pulse =
-                              1 +
-                              math.sin(_searchProgress.value * math.pi * 18) *
-                                  .08;
-                          return Stack(
-                            children: [
-                              for (final position in const [
-                                (left: 60.0, top: 330.0, angle: -.5),
-                                (left: 245.0, top: 290.0, angle: .4),
-                                (left: 285.0, top: 430.0, angle: -.3),
-                              ])
-                                Positioned(
-                                  left: position.left,
-                                  top: position.top,
-                                  child: Transform.scale(
-                                    scale: pulse,
-                                    child: Transform.rotate(
-                                      angle:
-                                          position.angle +
-                                          math.sin(
-                                                _searchProgress.value *
-                                                    math.pi *
-                                                    4,
-                                              ) *
-                                              .08,
-                                      child: Container(
-                                        width: 50,
-                                        height: 50,
-                                        decoration: const BoxDecoration(
-                                          color: Color(0x33206EEA),
-                                          shape: BoxShape.circle,
+                    if (!_accepted)
+                      Positioned.fill(
+                        child: AnimatedBuilder(
+                          animation: _searchProgress,
+                          builder: (context, _) {
+                            final pulse =
+                                1 +
+                                math.sin(_searchProgress.value * math.pi * 18) *
+                                    .08;
+                            return Stack(
+                              children: [
+                                for (final position in const [
+                                  (left: 60.0, top: 330.0, angle: -.5),
+                                  (left: 245.0, top: 290.0, angle: .4),
+                                  (left: 285.0, top: 430.0, angle: -.3),
+                                ])
+                                  Positioned(
+                                    left: position.left,
+                                    top: position.top,
+                                    child: Transform.scale(
+                                      scale: pulse,
+                                      child: Transform.rotate(
+                                        angle:
+                                            position.angle +
+                                            math.sin(
+                                                  _searchProgress.value *
+                                                      math.pi *
+                                                      4,
+                                                ) *
+                                                .08,
+                                        child: Container(
+                                          width: 50,
+                                          height: 50,
+                                          decoration: const BoxDecoration(
+                                            color: Color(0x33206EEA),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          padding: const EdgeInsets.all(8),
+                                          child: _vehicleImage(
+                                            widget.vehicleImage,
+                                          ),
                                         ),
-                                        padding: const EdgeInsets.all(8),
-                                        child: _vehicleImage(widget.vehicleImage),
                                       ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
-                    ),
                     Positioned(
                       right: 16,
                       bottom: 18,
@@ -855,9 +1009,8 @@ class _SearchPanel extends StatelessWidget {
     'IN_PROGRESS' => 'You are travelling to your destination',
     'PAYMENT_PENDING' => 'Review the final charges and complete payment',
     'COMPLETED' => 'Thank you for riding with RJS',
-    _ => timedOut
-        ? 'No nearby driver accepted within the search time'
-        : message,
+    _ =>
+      timedOut ? 'No nearby driver accepted within the search time' : message,
   };
 
   String get driverLine {
@@ -1047,16 +1200,16 @@ class _SearchPanel extends StatelessWidget {
                 child: Text(
                   accepted
                       ? status == 'DRIVER_ACCEPTED'
-                          ? 'Your driver accepted and can now begin travelling to the pickup.'
-                          : status == 'ARRIVED'
-                          ? 'Your driver has arrived. Share the OTP only when you are ready to begin.'
-                          : status == 'IN_PROGRESS'
-                          ? 'Your trip has started. Have a safe journey.'
-                          : status == 'PAYMENT_PENDING'
-                          ? 'Your final bill is ready. Pay now or scan the QR shown by your driver.'
-                          : status == 'COMPLETED'
-                          ? 'This ride has been completed successfully.'
-                          : 'Your driver is travelling to your pickup location.'
+                            ? 'Your driver accepted and can now begin travelling to the pickup.'
+                            : status == 'ARRIVED'
+                            ? 'Your driver has arrived. Share the OTP only when you are ready to begin.'
+                            : status == 'IN_PROGRESS'
+                            ? 'Your trip has started. Have a safe journey.'
+                            : status == 'PAYMENT_PENDING'
+                            ? 'Your final bill is ready. Pay now or scan the QR shown by your driver.'
+                            : status == 'COMPLETED'
+                            ? 'This ride has been completed successfully.'
+                            : 'Your driver is travelling to your pickup location.'
                       : timedOut
                       ? 'No driver accepted this request. Try searching again or cancel the ride.'
                       : 'Sit tight! We’re notifying nearby drivers. This usually takes less than a minute.',
@@ -1079,12 +1232,21 @@ class _SearchPanel extends StatelessWidget {
               children: [
                 const Text(
                   'TRIP START OTP',
-                  style: TextStyle(color: AppColors.muted, fontSize: 9, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   tripStartOtp!,
-                  style: const TextStyle(color: AppColors.orange, fontSize: 24, letterSpacing: 6, fontWeight: FontWeight.w900),
+                  style: const TextStyle(
+                    color: AppColors.orange,
+                    fontSize: 24,
+                    letterSpacing: 6,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ],
             ),
@@ -1095,7 +1257,11 @@ class _SearchPanel extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: paying || !walletAvailable ? null : onWalletPay,
             icon: const Icon(Icons.account_balance_wallet_outlined),
-            label: Text(walletAvailable ? 'Pay with Wallet · Save 5%' : 'Checkout / QR already started'),
+            label: Text(
+              walletAvailable
+                  ? 'Pay with Wallet · Save 5%'
+                  : 'Checkout / QR already started',
+            ),
           ),
           const SizedBox(height: 8),
         ],
@@ -1110,7 +1276,10 @@ class _SearchPanel extends StatelessWidget {
             child: Column(
               children: [
                 _BillRow(label: 'Ride fare', value: pricing!['distanceFare']),
-                _BillRow(label: 'Waiting charge', value: pricing!['waitingCharge']),
+                _BillRow(
+                  label: 'Waiting charge',
+                  value: pricing!['waitingCharge'],
+                ),
                 _BillRow(label: 'Parking', value: pricing!['parkingCharge']),
                 _BillRow(label: 'Toll', value: pricing!['tollCharge']),
                 _BillRow(label: 'GST', value: pricing!['gstAmount']),
@@ -1195,7 +1364,13 @@ class _SearchPanel extends StatelessWidget {
                   ),
                 ),
         ),
-        if (accepted && canCancelLatePickup && const {'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_EN_ROUTE'}.contains(status)) ...[
+        if (accepted &&
+            canCancelLatePickup &&
+            const {
+              'ASSIGNED',
+              'DRIVER_ACCEPTED',
+              'DRIVER_EN_ROUTE',
+            }.contains(status)) ...[
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
@@ -1211,7 +1386,11 @@ class _SearchPanel extends StatelessWidget {
 }
 
 class _BillRow extends StatelessWidget {
-  const _BillRow({required this.label, required this.value, this.strong = false});
+  const _BillRow({
+    required this.label,
+    required this.value,
+    this.strong = false,
+  });
   final String label;
   final Object? value;
   final bool strong;
@@ -1221,8 +1400,22 @@ class _BillRow extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 4),
     child: Row(
       children: [
-        Expanded(child: Text(label, style: TextStyle(color: strong ? AppColors.navy : AppColors.muted, fontWeight: strong ? FontWeight.w900 : FontWeight.w500))),
-        Text('₹${value ?? 0}', style: TextStyle(color: AppColors.navy, fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: strong ? AppColors.navy : AppColors.muted,
+              fontWeight: strong ? FontWeight.w900 : FontWeight.w500,
+            ),
+          ),
+        ),
+        Text(
+          '₹${value ?? 0}',
+          style: TextStyle(
+            color: AppColors.navy,
+            fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+          ),
+        ),
       ],
     ),
   );
@@ -1240,10 +1433,8 @@ class _Progress extends StatelessWidget {
     'PAYMENT_PENDING',
     'COMPLETED',
   }.contains(status);
-  bool get paymentReady => const {
-    'PAYMENT_PENDING',
-    'COMPLETED',
-  }.contains(status);
+  bool get paymentReady =>
+      const {'PAYMENT_PENDING', 'COMPLETED'}.contains(status);
 
   @override
   Widget build(BuildContext context) => Row(

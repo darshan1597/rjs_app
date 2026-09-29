@@ -1,42 +1,64 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/notifications/driver_notification_store.dart';
 import 'notification_popup.dart';
 
-class DriverHeaderActions extends StatelessWidget {
+class DriverHeaderActions extends StatefulWidget {
   const DriverHeaderActions({
     super.key,
     this.darkIcons = true,
     this.secondIcon = Icons.chat_bubble_outline_rounded,
     this.onSecondTap,
+    this.showSecondAction = true,
   });
 
   final bool darkIcons;
   final IconData secondIcon;
   final VoidCallback? onSecondTap;
+  final bool showSecondAction;
+
+  @override
+  State<DriverHeaderActions> createState() => _DriverHeaderActionsState();
+}
+
+class _DriverHeaderActionsState extends State<DriverHeaderActions> {
+  @override
+  void initState() {
+    super.initState();
+    DriverNotificationStore.refreshUnreadCount().catchError((_) {});
+  }
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      _ActionButton(
-        icon: Icons.notifications_none_rounded,
-        dot: true,
-        color: darkIcons ? Colors.black87 : Colors.white,
-        onTap: (buttonContext) {
-          final box = buttonContext.findRenderObject() as RenderBox?;
-          final anchor = box == null
-              ? null
-              : box.localToGlobal(Offset.zero) & box.size;
-          showRjsNotifications(context, anchorRect: anchor);
-        },
+      ValueListenableBuilder<int>(
+        valueListenable: DriverNotificationStore.unreadCount,
+        builder: (_, count, _) => _ActionButton(
+          icon: Icons.notifications_none_rounded,
+          badgeCount: count,
+          color: widget.darkIcons ? Colors.black87 : Colors.white,
+          onTap: (buttonContext) async {
+            final box = buttonContext.findRenderObject() as RenderBox?;
+            final anchor = box == null
+                ? null
+                : box.localToGlobal(Offset.zero) & box.size;
+            await showRjsNotifications(context, anchorRect: anchor);
+            await DriverNotificationStore.refreshUnreadCount().catchError(
+              (_) {},
+            );
+          },
+        ),
       ),
-      const SizedBox(width: 8),
-      _ActionButton(
-        icon: secondIcon,
-        color: darkIcons ? Colors.black87 : Colors.white,
-        onTap: (_) => onSecondTap?.call(),
-      ),
+      if (widget.showSecondAction) ...[
+        const SizedBox(width: 8),
+        _ActionButton(
+          icon: widget.secondIcon,
+          color: widget.darkIcons ? Colors.black87 : Colors.white,
+          onTap: (_) => widget.onSecondTap?.call(),
+        ),
+      ],
     ],
   );
 }
@@ -46,13 +68,13 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.onTap,
-    this.dot = false,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
   final Color color;
   final ValueChanged<BuildContext> onTap;
-  final bool dot;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) => Stack(
@@ -75,21 +97,22 @@ class _ActionButton extends StatelessWidget {
           ),
         ),
       ),
-      if (dot)
+      if (badgeCount > 0)
         Positioned(
           right: 1,
           top: 0,
           child: Container(
-            width: 15,
+            constraints: const BoxConstraints(minWidth: 15, minHeight: 15),
+            padding: const EdgeInsets.symmetric(horizontal: 3),
             height: 15,
             alignment: Alignment.center,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: AppColors.red,
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(20),
             ),
-            child: const Text(
-              '3',
-              style: TextStyle(
+            child: Text(
+              badgeCount > 99 ? '99+' : '$badgeCount',
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 8,
                 fontWeight: FontWeight.w800,

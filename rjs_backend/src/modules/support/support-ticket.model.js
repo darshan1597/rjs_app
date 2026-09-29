@@ -62,6 +62,12 @@ const schema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId, 
             ref: "Booking" 
         },
+        driverId: { type: mongoose.Schema.Types.ObjectId, ref: "Driver", index: true },
+        profileChangeArea: { type: String, enum: ["PERSONAL", "PHOTO", "DOCUMENTS", "VEHICLE", "BANK"] },
+        reviewDecision: { type: String, enum: ["APPROVED", "REJECTED"] },
+        reviewNote: String,
+        reviewedAt: Date,
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "AdminAccount" },
         assignedEmployeeId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "AdminAccount",

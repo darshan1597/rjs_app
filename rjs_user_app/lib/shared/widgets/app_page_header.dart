@@ -102,20 +102,7 @@ class AppPageHeader extends StatelessWidget {
                   padding: EdgeInsets.zero,
                 ),
               ),
-              const Positioned(
-                right: 7,
-                top: 7,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: AppColors.orange,
-                    shape: BoxShape.circle,
-                    border: Border.fromBorderSide(
-                      BorderSide(color: Colors.white, width: 1.5),
-                    ),
-                  ),
-                  child: SizedBox(width: 9, height: 9),
-                ),
-              ),
+              const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
             ],
           ),
         ],

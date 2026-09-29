@@ -7,9 +7,13 @@ import '../../../shared/widgets/notification_popup.dart';
 
 String _walletMoney(num paise) {
   final parts = (paise / 100).toStringAsFixed(2).split('.');
-  final whole = parts.first.replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (match) => '${match[1]},');
+  final whole = parts.first.replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]},',
+  );
   return '₹$whole.${parts.last}';
 }
+
 String _walletDate(dynamic value) {
   final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
   if (date == null) return '--';
@@ -17,10 +21,19 @@ String _walletDate(dynamic value) {
 }
 
 class WalletDesign extends StatelessWidget {
-  const WalletDesign({super.key, required this.wallet, required this.showBalance,
-    required this.loading, required this.paying, required this.error,
-    required this.onToggle, required this.onAddMoney, required this.onRefresh,
-    required this.onWithdraw, required this.onCheckPayment});
+  const WalletDesign({
+    super.key,
+    required this.wallet,
+    required this.showBalance,
+    required this.loading,
+    required this.paying,
+    required this.error,
+    required this.onToggle,
+    required this.onAddMoney,
+    required this.onRefresh,
+    required this.onWithdraw,
+    required this.onCheckPayment,
+  });
   final Map<String, dynamic>? wallet;
   final bool showBalance, loading, paying;
   final String? error;
@@ -30,14 +43,22 @@ class WalletDesign extends StatelessWidget {
   final void Function(Map) onCheckPayment;
   int get discount => (wallet?['discountPercent'] as num? ?? 5).toInt();
   List<Map<String, dynamic>> get transactions =>
-    (wallet?['transactions'] as List? ?? []).cast<Map<String, dynamic>>();
+      (wallet?['transactions'] as List? ?? []).cast<Map<String, dynamic>>();
   List<Map<String, dynamic>> get withdrawals =>
-    (wallet?['withdrawals'] as List? ?? []).cast<Map<String, dynamic>>();
+      (wallet?['withdrawals'] as List? ?? []).cast<Map<String, dynamic>>();
   void _history(BuildContext context) => showModalBottomSheet<void>(
-    context: context, isScrollControlled: true, showDragHandle: true,
-    builder: (_) => SafeArea(child: SizedBox(height: MediaQuery.sizeOf(context).height * .7,
-      child: SingleChildScrollView(padding: const EdgeInsets.all(16),
-        child: _RecentTransactions(transactions: transactions)))),
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * .7,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: _RecentTransactions(transactions: transactions),
+        ),
+      ),
+    ),
   );
 
   @override
@@ -50,55 +71,103 @@ class WalletDesign extends StatelessWidget {
     body: SafeArea(
       top: false,
       bottom: false,
-      child: RefreshIndicator(onRefresh: onRefresh, child: CustomScrollView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        slivers: [
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              MediaQuery.paddingOf(context).top + 8,
-              16,
-              118 + MediaQuery.paddingOf(context).bottom,
-            ),
-            sliver: SliverList.list(
-              children: [
-                _WalletHeader(onMenu: () => showRjsDrawer(context)),
-                if (loading) const LinearProgressIndicator(),
-                if (error != null) Padding(padding: const EdgeInsets.only(top: 10),
-                  child: Row(children: [Expanded(child: Text(error!, style: const TextStyle(color: Colors.red))),
-                    TextButton(onPressed: loading ? null : onRefresh, child: const Text('Retry'))])),
-                const SizedBox(height: 14),
-                _BalanceCard(
-                  showBalance: showBalance,
-                  balancePaise: wallet?['balancePaise'] as num?,
-                  mainPaise: wallet?['withdrawablePaise'] as num?,
-                  bonusPaise: wallet?['restrictedPaise'] as num?,
-                  lockedPaise: wallet?['lockedPaise'] as num?,
-                  onToggle: onToggle,
-                  onAddMoney: paying || wallet == null ? null : onAddMoney,
-                  onWithdraw: paying || wallet == null || wallet?['withdrawalEnabled'] != true || (wallet?['withdrawablePaise'] as num? ?? 0) < 10000 ? null : onWithdraw,
-                  paying: paying,
-                ),
-                const SizedBox(height: 10),
-                _WalletPromo(discount: discount),
-                if (withdrawals.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _WithdrawalStatus(item: withdrawals.first),
-                ],
-                for (final topup in (wallet?['pendingTopups'] as List? ?? [])) ...[
-                  const SizedBox(height: 10),
-                  _Panel(child: Row(children: [Expanded(child: Text('Pending top-up: ${_walletMoney(topup['amountPaise'] as num)}\nAlready paid? Check without paying again.',
-                    style: const TextStyle(color: AppColors.navy, fontSize: 11))),
-                    TextButton(onPressed: paying ? null : () => onCheckPayment(topup as Map), child: const Text('Check payment'))])),
-                ],
-                const SizedBox(height: 10),
-                _RecentTransactions(transactions: transactions.take(5).toList(),
-                  loading: wallet == null, onViewAll: () => _history(context)),
-              ],
-            ),
+      child: RefreshIndicator(
+        onRefresh: onRefresh,
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
           ),
-        ],
-      )),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                MediaQuery.paddingOf(context).top + 8,
+                16,
+                118 + MediaQuery.paddingOf(context).bottom,
+              ),
+              sliver: SliverList.list(
+                children: [
+                  _WalletHeader(onMenu: () => showRjsDrawer(context)),
+                  if (loading) const LinearProgressIndicator(),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              error!,
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: loading ? null : onRefresh,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  _BalanceCard(
+                    showBalance: showBalance,
+                    balancePaise: wallet?['balancePaise'] as num?,
+                    mainPaise: wallet?['withdrawablePaise'] as num?,
+                    bonusPaise: wallet?['restrictedPaise'] as num?,
+                    lockedPaise: wallet?['lockedPaise'] as num?,
+                    onToggle: onToggle,
+                    onAddMoney: paying || wallet == null ? null : onAddMoney,
+                    onWithdraw:
+                        paying ||
+                            wallet == null ||
+                            wallet?['withdrawalEnabled'] != true ||
+                            (wallet?['withdrawablePaise'] as num? ?? 0) < 10000
+                        ? null
+                        : onWithdraw,
+                    paying: paying,
+                  ),
+                  const SizedBox(height: 10),
+                  _WalletPromo(discount: discount),
+                  if (withdrawals.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _WithdrawalStatus(item: withdrawals.first),
+                  ],
+                  for (final topup
+                      in (wallet?['pendingTopups'] as List? ?? [])) ...[
+                    const SizedBox(height: 10),
+                    _Panel(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Pending top-up: ${_walletMoney(topup['amountPaise'] as num)}\nAlready paid? Check without paying again.',
+                              style: const TextStyle(
+                                color: AppColors.navy,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: paying
+                                ? null
+                                : () => onCheckPayment(topup as Map),
+                            child: const Text('Check payment'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  _RecentTransactions(
+                    transactions: transactions.take(5).toList(),
+                    loading: wallet == null,
+                    onViewAll: () => _history(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }
@@ -170,19 +239,7 @@ class _WalletHeaderButton extends StatelessWidget {
           children: [
             Icon(icon, color: AppColors.navy, size: 29),
             if (notification)
-              Positioned(
-                right: 7,
-                top: 7,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: AppColors.orange,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
+              const Positioned(right: 2, top: 2, child: RjsNotificationDot()),
           ],
         ),
       ),
@@ -191,9 +248,17 @@ class _WalletHeaderButton extends StatelessWidget {
 }
 
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.showBalance, required this.onToggle,
-    required this.balancePaise, required this.mainPaise, required this.bonusPaise,
-    required this.lockedPaise, required this.onAddMoney, required this.onWithdraw, required this.paying});
+  const _BalanceCard({
+    required this.showBalance,
+    required this.onToggle,
+    required this.balancePaise,
+    required this.mainPaise,
+    required this.bonusPaise,
+    required this.lockedPaise,
+    required this.onAddMoney,
+    required this.onWithdraw,
+    required this.paying,
+  });
   final bool showBalance;
   final VoidCallback onToggle;
   final num? balancePaise, mainPaise, bonusPaise, lockedPaise;
@@ -201,7 +266,11 @@ class _BalanceCard extends StatelessWidget {
   final VoidCallback? onWithdraw;
   final bool paying;
 
-  String _displayAmount(num? amount) => amount == null ? '—' : showBalance ? _walletMoney(amount) : '₹ ••••';
+  String _displayAmount(num? amount) => amount == null
+      ? '—'
+      : showBalance
+      ? _walletMoney(amount)
+      : '₹ ••••';
 
   @override
   Widget build(BuildContext context) => Container(
@@ -238,7 +307,11 @@ class _BalanceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    balancePaise == null ? '—' : showBalance ? _walletMoney(balancePaise!) : '₹ ••••••',
+                    balancePaise == null
+                        ? '—'
+                        : showBalance
+                        ? _walletMoney(balancePaise!)
+                        : '₹ ••••••',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 29,
@@ -248,23 +321,27 @@ class _BalanceCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   InkWell(
                     onTap: onToggle,
-                    child: FittedBox(alignment: Alignment.centerLeft, fit: BoxFit.scaleDown, child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Total Balance',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                        const SizedBox(width: 7),
-                        Icon(
-                          showBalance
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          color: Colors.white,
-                          size: 17,
-                        ),
-                      ],
-                    )),
+                    child: FittedBox(
+                      alignment: Alignment.centerLeft,
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Total Balance',
+                            style: TextStyle(color: Colors.white, fontSize: 11),
+                          ),
+                          const SizedBox(width: 7),
+                          Icon(
+                            showBalance
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: Colors.white,
+                            size: 17,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -333,9 +410,17 @@ class _BalanceCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                     disabledForegroundColor: Colors.white38,
                     side: const BorderSide(color: Colors.white54),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-                    textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ],
@@ -348,20 +433,36 @@ class _BalanceCard extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: _BalancePart(amount: _displayAmount(mainPaise), label: 'Main Balance',
-              icon: Icons.account_balance_wallet_outlined,
-              description: 'Money you added to your wallet, plus eligible ride refunds.',
-              usage: 'Use it for RJS rides or request a withdrawal to your UPI ID.')),
+            Expanded(
+              child: _BalancePart(
+                amount: _displayAmount(mainPaise),
+                label: 'Main Balance',
+                icon: Icons.account_balance_wallet_outlined,
+                description: 'Money you added to your wallet, plus eligible ride refunds.',
+                usage: 'Use it for RJS rides or request a withdrawal to your UPI ID.',
+              ),
+            ),
             _balanceDivider(),
-            Expanded(child: _BalancePart(amount: _displayAmount(bonusPaise), label: 'Bonus Balance',
-              icon: Icons.card_giftcard_outlined,
-              description: 'Credits added to your wallet by RJS, including goodwill or promotional credits.',
-              usage: 'Use it for RJS rides. Bonus Balance cannot be withdrawn.')),
+            Expanded(
+              child: _BalancePart(
+                amount: _displayAmount(bonusPaise),
+                label: 'Bonus Balance',
+                icon: Icons.card_giftcard_outlined,
+                description: 'Credits added to your wallet by RJS, including goodwill or promotional credits.',
+                usage:
+                    'Use it for RJS rides. Bonus Balance cannot be withdrawn.',
+              ),
+            ),
             _balanceDivider(),
-            Expanded(child: _BalancePart(amount: _displayAmount(lockedPaise), label: 'Locked Balance',
-              icon: Icons.lock_clock_outlined,
-              description: 'Money reserved while a withdrawal request is pending or processing.',
-              usage: 'It is not included in Total Balance. If the withdrawal fails or is rejected, it returns to Main Balance.')),
+            Expanded(
+              child: _BalancePart(
+                amount: _displayAmount(lockedPaise),
+                label: 'Locked Balance',
+                icon: Icons.lock_clock_outlined,
+                description: 'Money reserved while a withdrawal request is pending or processing.',
+                usage: 'It is not included in Total Balance. If the withdrawal fails or is rejected, it returns to Main Balance.',
+              ),
+            ),
           ],
         ),
       ],
@@ -377,8 +478,13 @@ class _BalanceCard extends StatelessWidget {
 }
 
 class _BalancePart extends StatelessWidget {
-  const _BalancePart({required this.amount, required this.label, required this.icon,
-    required this.description, required this.usage});
+  const _BalancePart({
+    required this.amount,
+    required this.label,
+    required this.icon,
+    required this.description,
+    required this.usage,
+  });
   final String amount, label, description, usage;
   final IconData icon;
 
@@ -387,44 +493,102 @@ class _BalancePart extends StatelessWidget {
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: Colors.white,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
     builder: (sheetContext) => SafeArea(
       top: false,
-      child: SingleChildScrollView(child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(color: const Color(0xFFEAF2FF), borderRadius: BorderRadius.circular(12)),
-              child: Icon(icon, color: AppColors.blue, size: 23),
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Text(label, style: const TextStyle(
-              color: AppColors.navy, fontSize: 19, fontWeight: FontWeight.w800))),
-            IconButton(
-              tooltip: 'Close',
-              onPressed: () => Navigator.pop(sheetContext),
-              icon: const Icon(Icons.close_rounded, color: AppColors.muted),
-            ),
-          ]),
-          const SizedBox(height: 20),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(color: const Color(0xFFF3F7FF), borderRadius: BorderRadius.circular(14)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Current balance', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-              const SizedBox(height: 4),
-              Text(amount, style: const TextStyle(color: AppColors.navy, fontSize: 25, fontWeight: FontWeight.w800)),
-            ]),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF2FF),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: AppColors.blue, size: 23),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(sheetContext),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F7FF),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Current balance',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      amount,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                description,
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 14,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                usage,
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 18),
-          Text(description, style: const TextStyle(color: AppColors.navy, fontSize: 14, height: 1.5)),
-          const SizedBox(height: 10),
-          Text(usage, style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5)),
-        ]),
-      )),
+        ),
+      ),
     ),
   );
 
@@ -435,26 +599,43 @@ class _BalancePart extends StatelessWidget {
       FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text(amount, maxLines: 1, style: const TextStyle(
-          color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800,
-        )),
+        child: Text(
+          amount,
+          maxLines: 1,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
       ),
       const SizedBox(height: 5),
-      Row(children: [
-        Flexible(child: Text(label, maxLines: 2, style: const TextStyle(color: Colors.white, fontSize: 10))),
-        const SizedBox(width: 2),
-        IconButton(
-          onPressed: () => _showDetails(context),
-          tooltip: 'About $label',
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-          icon: const Icon(Icons.info_outline_rounded, color: Colors.white70, size: 17),
-        ),
-      ]),
+      Row(
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 2,
+              style: const TextStyle(color: Colors.white, fontSize: 10),
+            ),
+          ),
+          const SizedBox(width: 2),
+          IconButton(
+            onPressed: () => _showDetails(context),
+            tooltip: 'About $label',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+            icon: const Icon(
+              Icons.info_outline_rounded,
+              color: Colors.white70,
+              size: 17,
+            ),
+          ),
+        ],
+      ),
     ],
   );
 }
-
 
 class _WithdrawalStatus extends StatelessWidget {
   const _WithdrawalStatus({required this.item});
@@ -464,15 +645,44 @@ class _WithdrawalStatus extends StatelessWidget {
     final status = item['status']?.toString() ?? 'PENDING';
     final completed = status == 'PAID';
     final returned = ['REJECTED', 'FAILED', 'REVERSED'].contains(status);
-    return _Panel(child: Row(children: [
-      Icon(completed ? Icons.check_circle_rounded : returned ? Icons.replay_circle_filled_rounded : Icons.schedule_send_rounded,
-        color: completed ? Colors.green : returned ? Colors.orange : AppColors.blue),
-      const SizedBox(width: 10),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Withdrawal ${status.toLowerCase()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.navy)),
-        Text('${_walletMoney(item['amountPaise'] as num? ?? 0)} · ${item['vpa'] ?? ''}', style: const TextStyle(fontSize: 9, color: AppColors.muted)),
-      ])),
-    ]));
+    return _Panel(
+      child: Row(
+        children: [
+          Icon(
+            completed
+                ? Icons.check_circle_rounded
+                : returned
+                ? Icons.replay_circle_filled_rounded
+                : Icons.schedule_send_rounded,
+            color: completed
+                ? Colors.green
+                : returned
+                ? Colors.orange
+                : AppColors.blue,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Withdrawal ${status.toLowerCase()}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.navy,
+                  ),
+                ),
+                Text(
+                  '${_walletMoney(item['amountPaise'] as num? ?? 0)} · ${item['vpa'] ?? ''}',
+                  style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -481,38 +691,82 @@ class _WalletPromo extends StatelessWidget {
   final int discount;
   @override
   Widget build(BuildContext context) => Container(
-      constraints: const BoxConstraints(minHeight: 88),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: const Color(0xFFF2F7FF), borderRadius: BorderRadius.circular(12)),
-      child: Row(children: [
-        Image.asset('assets/images/wallet-promo-transparent.png', width: 72, height: 66, fit: BoxFit.contain),
+    constraints: const BoxConstraints(minHeight: 88),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF2F7FF),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Image.asset(
+          'assets/images/wallet-promo-transparent.png',
+          width: 72,
+          height: 66,
+          fit: BoxFit.contain,
+        ),
         const SizedBox(width: 10),
-        Expanded(child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              const Expanded(child: Text('Wallet ride discount',
-                style: TextStyle(color: AppColors.navy, fontSize: 12, fontWeight: FontWeight.w800))),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFDDEBFF), borderRadius: BorderRadius.circular(6)),
-                child: Text('$discount% OFF', style: const TextStyle(
-                  color: AppColors.blue, fontSize: 10, fontWeight: FontWeight.w800)),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Wallet ride discount',
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDDEBFF),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '$discount% OFF',
+                      style: const TextStyle(
+                        color: AppColors.blue,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ]),
-            const SizedBox(height: 6),
-            const Text('Automatically applied to your final ride bill when you pay with your wallet.',
-              style: TextStyle(color: AppColors.muted, fontSize: 10, height: 1.4)),
-          ],
-        )),
-      ]),
-    );
+              const SizedBox(height: 6),
+              const Text(
+                'Automatically applied to your final ride bill when you pay with your wallet.',
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 10,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _RecentTransactions extends StatelessWidget {
-  const _RecentTransactions({required this.transactions, this.loading = false, this.onViewAll});
+  const _RecentTransactions({
+    required this.transactions,
+    this.loading = false,
+    this.onViewAll,
+  });
   final List<Map<String, dynamic>> transactions;
   final bool loading;
   final VoidCallback? onViewAll;
@@ -525,15 +779,16 @@ class _RecentTransactions extends StatelessWidget {
         Row(
           children: [
             const Expanded(child: _Title('Recent Transactions')),
-            if (onViewAll != null) TextButton(
-              onPressed: onViewAll,
-              child: const Row(
-                children: [
-                  Text('View All', style: TextStyle(fontSize: 10)),
-                  Icon(Icons.chevron_right_rounded, size: 16),
-                ],
+            if (onViewAll != null)
+              TextButton(
+                onPressed: onViewAll,
+                child: const Row(
+                  children: [
+                    Text('View All', style: TextStyle(fontSize: 10)),
+                    Icon(Icons.chevron_right_rounded, size: 16),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
         Container(
@@ -544,100 +799,138 @@ class _RecentTransactions extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
-              if (transactions.isEmpty) Padding(padding: const EdgeInsets.all(20),
-                child: Text(loading ? 'Loading transactions…' : 'No transactions yet.',
-                  style: const TextStyle(color: AppColors.muted, fontSize: 11))),
-              ...List.generate(transactions.length, (i) {
-              final entry = transactions[i];
-              final credit = entry['type'] == 'TOPUP' || entry['type'] == 'ADMIN_CREDIT' || entry['type'] == 'REFUND_CREDIT' || entry['type'] == 'WITHDRAWAL_RELEASE';
-              final saved = entry['discountPaise'] as num? ?? 0;
-              final item = (
-                entry['type'] == 'ADMIN_CREDIT' ? entry['description']?.toString() ?? 'Wallet credit' : entry['type'] == 'REFUND_CREDIT' ? entry['description']?.toString() ?? 'Ride refund' : entry['type'] == 'WITHDRAWAL_HOLD' ? 'Withdrawal requested' : entry['type'] == 'WITHDRAWAL_RELEASE' ? 'Withdrawal returned' : credit ? 'Added to Wallet' : entry['description']?.toString() ?? 'Ride payment',
-                entry['type'] == 'ADMIN_CREDIT' ? 'RJS wallet adjustment' : entry['type'] == 'REFUND_CREDIT' ? 'Refund credited by RJS' : entry['type'].toString().startsWith('WITHDRAWAL_') ? entry['description']?.toString() ?? 'Wallet withdrawal' : credit ? 'Via Razorpay' : entry['type'] == 'ADMIN_DEBIT' ? 'RJS wallet adjustment' : saved > 0 ? 'Saved ${_walletMoney(saved)} · Wallet discount' : 'Paid with RJS Wallet',
-                '${credit ? '+' : '-'} ${_walletMoney(entry['amountPaise'] as num? ?? 0)}',
-                _walletDate(entry['createdAt']), credit,
-              );
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
-                decoration: BoxDecoration(
-                  border: i == transactions.length - 1
-                      ? null
-                      : const Border(
-                          bottom: BorderSide(color: Color(0xFFE8EBF0)),
-                        ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: item.$5
-                            ? const Color(0xFFEDF8EF)
-                            : const Color(0xFFFFF2E8),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        item.$5
-                            ? Icons.south_rounded
-                            : Icons.north_east_rounded,
-                        color: item.$5
-                            ? const Color(0xFF17943A)
-                            : AppColors.orange,
-                        size: 18,
-                      ),
+              if (transactions.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(
+                    loading ? 'Loading transactions…' : 'No transactions yet.',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 11,
                     ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  ),
+                ),
+              ...List.generate(transactions.length, (i) {
+                final entry = transactions[i];
+                final credit =
+                    entry['type'] == 'TOPUP' ||
+                    entry['type'] == 'ADMIN_CREDIT' ||
+                    entry['type'] == 'REFUND_CREDIT' ||
+                    entry['type'] == 'WITHDRAWAL_RELEASE';
+                final saved = entry['discountPaise'] as num? ?? 0;
+                final item = (
+                  entry['type'] == 'ADMIN_CREDIT'
+                      ? entry['description']?.toString() ?? 'Wallet credit'
+                      : entry['type'] == 'REFUND_CREDIT'
+                      ? entry['description']?.toString() ?? 'Ride refund'
+                      : entry['type'] == 'WITHDRAWAL_HOLD'
+                      ? 'Withdrawal requested'
+                      : entry['type'] == 'WITHDRAWAL_RELEASE'
+                      ? 'Withdrawal returned'
+                      : credit
+                      ? 'Added to Wallet'
+                      : entry['description']?.toString() ?? 'Ride payment',
+                  entry['type'] == 'ADMIN_CREDIT'
+                      ? 'RJS wallet adjustment'
+                      : entry['type'] == 'REFUND_CREDIT'
+                      ? 'Refund credited by RJS'
+                      : entry['type'].toString().startsWith('WITHDRAWAL_')
+                      ? entry['description']?.toString() ?? 'Wallet withdrawal'
+                      : credit
+                      ? 'Via Razorpay'
+                      : entry['type'] == 'ADMIN_DEBIT'
+                      ? 'RJS wallet adjustment'
+                      : saved > 0
+                      ? 'Saved ${_walletMoney(saved)} · Wallet discount'
+                      : 'Paid with RJS Wallet',
+                  '${credit ? '+' : '-'} ${_walletMoney(entry['amountPaise'] as num? ?? 0)}',
+                  _walletDate(entry['createdAt']),
+                  credit,
+                );
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    border: i == transactions.length - 1
+                        ? null
+                        : const Border(
+                            bottom: BorderSide(color: Color(0xFFE8EBF0)),
+                          ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: item.$5
+                              ? const Color(0xFFEDF8EF)
+                              : const Color(0xFFFFF2E8),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          item.$5
+                              ? Icons.south_rounded
+                              : Icons.north_east_rounded,
+                          color: item.$5
+                              ? const Color(0xFF17943A)
+                              : AppColors.orange,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.$1,
+                              style: const TextStyle(
+                                color: AppColors.navy,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              item.$2,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 8.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            item.$1,
-                            style: const TextStyle(
-                              color: AppColors.navy,
-                              fontSize: 10,
+                            item.$3,
+                            style: TextStyle(
+                              color: item.$5
+                                  ? const Color(0xFF168B34)
+                                  : AppColors.navy,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            item.$2,
+                            item.$4,
                             style: const TextStyle(
                               color: AppColors.muted,
-                              fontSize: 8.5,
+                              fontSize: 8,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          item.$3,
-                          style: TextStyle(
-                            color: item.$5
-                                ? const Color(0xFF168B34)
-                                : AppColors.navy,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          item.$4,
-                          style: const TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 8,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }),
+                    ],
+                  ),
+                );
+              }),
             ],
           ),
         ),
@@ -645,7 +938,6 @@ class _RecentTransactions extends StatelessWidget {
     ),
   );
 }
-
 
 class _Panel extends StatelessWidget {
   const _Panel({required this.child, this.padding = const EdgeInsets.all(12)});

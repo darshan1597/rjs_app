@@ -14,6 +14,11 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             if (call.method == "getGoogleMapsMapId") {
                 result.success(getString(R.string.google_maps_map_id).ifBlank { null })
+            } else if (call.method == "getSupportConfig") {
+                result.success(mapOf(
+                    "phone" to BuildConfig.RJS_SUPPORT_PHONE,
+                    "email" to BuildConfig.RJS_SUPPORT_EMAIL,
+                ))
             } else {
                 result.notImplemented()
             }

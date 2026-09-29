@@ -7,6 +7,7 @@ import '../../rides/screens/choose_ride_screen.dart';
 import '../models/map_place.dart';
 import '../services/maps_service.dart';
 import 'location_search_screen.dart';
+import '../../../shared/maps/rjs_map_markers.dart';
 
 class FullMapTripPickerScreen extends StatefulWidget {
   const FullMapTripPickerScreen({super.key});
@@ -25,13 +26,32 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
   bool _loadingPickup = true;
   bool _loadingRoute = false;
   List<LatLng> _routePoints = const [];
+  BitmapDescriptor? _pickupPin;
+  BitmapDescriptor? _destinationPin;
+  late final RjsPickupMarkerPulse _pickupPulse;
 
   @override
   void initState() {
     super.initState();
     _pickup = MapsService.cachedCurrentPlace;
     _loadingPickup = _pickup == null;
+    _pickupPulse = RjsPickupMarkerPulse((pin) {
+      if (mounted) setState(() => _pickupPin = pin);
+    });
+    _pickupPulse.start();
+    _loadMapPins();
     _loadCurrentPickup();
+  }
+
+  Future<void> _loadMapPins() async {
+    final pin = await RjsMapMarkers.destination();
+    if (mounted) setState(() => _destinationPin = pin);
+  }
+
+  @override
+  void dispose() {
+    _pickupPulse.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCurrentPickup() async {
@@ -52,6 +72,8 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => LocationSearchScreen(
+          title: 'Choose Pickup',
+          searchHint: 'Search pickup',
           initialValue: _pickup?.address,
           initialPlace: _pickup,
         ),
@@ -225,17 +247,19 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
         Marker(
           markerId: const MarkerId('pickup'),
           position: LatLng(pickup.latitude, pickup.longitude),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueAzure,
-          ),
+          icon:
+              _pickupPin ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(.5, .87),
         ),
       if (destination != null)
         Marker(
           markerId: const MarkerId('destination'),
           position: LatLng(destination.latitude, destination.longitude),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange,
-          ),
+          icon:
+              _destinationPin ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          anchor: const Offset(.5, .87),
         ),
     };
 
@@ -247,7 +271,9 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
             child: GoogleMap(
               mapId: GoogleMapsConfig.mapId,
               initialCameraPosition: CameraPosition(
-                target: pickup == null ? _bengaluru : LatLng(pickup.latitude, pickup.longitude),
+                target: pickup == null
+                    ? _bengaluru
+                    : LatLng(pickup.latitude, pickup.longitude),
                 zoom: pickup == null ? 12.5 : 15.5,
               ),
               padding: EdgeInsets.only(
@@ -362,7 +388,8 @@ class _FullMapTripPickerScreenState extends State<FullMapTripPickerScreen> {
                       width: double.infinity,
                       height: 54,
                       child: FilledButton(
-                        onPressed: pickup != null &&
+                        onPressed:
+                            pickup != null &&
                                 destination != null &&
                                 !_loadingRoute
                             ? _continue

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/network/driver_api_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/notifications/driver_notification_store.dart';
 import '../../../shared/widgets/notification_popup.dart';
 
 class DriverHomeHeader extends StatelessWidget {
@@ -196,50 +197,60 @@ class _HeaderIcon extends StatelessWidget {
   final bool notification;
 
   @override
-  Widget build(BuildContext context) => Stack(
-    clipBehavior: Clip.none,
-    children: [
-      Material(
-        color: Colors.white,
-        shape: const CircleBorder(),
-        elevation: 2,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          hoverColor: Colors.transparent,
-          focusColor: Colors.transparent,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-          onTap: notification ? () => showRjsNotifications(context) : () {},
-          child: SizedBox(
-            width: 43,
-            height: 43,
-            child: Icon(icon, color: Colors.black87, size: 24),
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: DriverNotificationStore.unreadCount,
+    builder: (context, unreadCount, _) => Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.white,
+          shape: const CircleBorder(),
+          elevation: 2,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
+            focusColor: Colors.transparent,
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            onTap: notification
+                ? () async {
+                    await showRjsNotifications(context);
+                    await DriverNotificationStore.refreshUnreadCount()
+                        .catchError((_) {});
+                  }
+                : () {},
+            child: SizedBox(
+              width: 43,
+              height: 43,
+              child: Icon(icon, color: Colors.black87, size: 24),
+            ),
           ),
         ),
-      ),
-      if (dot)
-        Positioned(
-          right: 1,
-          top: 0,
-          child: Container(
-            width: 15,
-            height: 15,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(
-              color: AppColors.red,
-              shape: BoxShape.circle,
-            ),
-            child: const Text(
-              '3',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 8,
-                fontWeight: FontWeight.w800,
+        if (dot && unreadCount > 0)
+          Positioned(
+            right: 1,
+            top: 0,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 15, minHeight: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              height: 15,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.red,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : '$unreadCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
-        ),
-    ],
+      ],
+    ),
   );
 }

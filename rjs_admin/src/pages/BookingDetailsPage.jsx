@@ -7,6 +7,7 @@ import {
     LuMessageSquare,
     LuPhone,
     LuRoute,
+    LuStar,
     LuUserRound,
 } from "react-icons/lu";
 import { useNavigate, useParams } from "react-router-dom";
@@ -213,6 +214,24 @@ export default function BookingDetailsPage() {
                                 />
                             </div>
                         </Panel>
+                        {booking.customerRating && (
+                            <Panel title="Customer rating" icon={LuStar}>
+                                <div className="rounded-xl bg-amber-50 p-4">
+                                    <div className="flex items-center gap-1 text-amber-500">
+                                        {Array.from({ length: 5 }, (_, index) => (
+                                            <LuStar key={index} className={index < booking.customerRating.score ? "fill-current" : "text-amber-200"} />
+                                        ))}
+                                        <b className="ml-2 text-sm text-slate-700">{booking.customerRating.score}/5</b>
+                                    </div>
+                                    <p className="mt-2 whitespace-pre-wrap text-[10px] text-slate-600">
+                                        {booking.customerRating.review || "No written review"}
+                                    </p>
+                                    <p className="mt-2 text-[8px] text-slate-400">
+                                        Submitted {date(booking.customerRating.submittedAt)}
+                                    </p>
+                                </div>
+                            </Panel>
+                        )}
                         <Panel title="Refunds" icon={LuCalendarClock}>
                             {refunds.length === 0 ? (
                                 <p className="text-[9px] text-slate-400">No refund records.</p>
