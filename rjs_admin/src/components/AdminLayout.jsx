@@ -14,6 +14,7 @@ import {
   LuUsers,
   LuWalletCards,
   LuChartNoAxesCombined,
+  LuInbox,
 } from "react-icons/lu";
 import Brand from "./Brand.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -33,6 +34,7 @@ const employeeLinks = [
   ["/vehicles", LuCarFront, "Vehicles"],
   ["/bookings", LuCalendarDays, "Bookings"],
   ["/custom-enquiries", LuClipboardPenLine, "Custom enquiries"],
+  ["/website-enquiries", LuInbox, "Website enquiries"],
   ["/tour-packages", LuPackageOpen, "Tour packages"],
   ["/payments", LuWalletCards, "Payments"],
   ["/wallets", LuWalletCards, "Wallets"],

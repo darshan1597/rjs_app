@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar.jsx";
 import Footer from "../components/Footer.jsx";
 import LocationSelectButton from "../components/LocationSelectButton.jsx";
+import { fetchTourPackages, formatPackagePrice, packageImageUrl } from "../lib/tourPackages.js";
 import { ArrowRight, BadgeCheck, BusFront, CalendarDays, CarFront, Check, ChevronDown, Clock3, Headphones, MapPin, Menu, Navigation, Phone, Route, ShieldCheck, Star, Users, Van, X, Mail, LockKeyhole, UserRound, Eye, Smartphone, ArrowLeft, Snowflake, ChevronLeft, ChevronRight, } from "lucide-react";
 
 const vehicles = [
@@ -37,59 +38,6 @@ const vehicles = [
         seats: "3",
         icon: Navigation,
         accent: "#fff1ba",
-    },
-];
-
-const popularPackages = [
-    {
-        slug: "coorg",
-        name: "Coorg Escape",
-        place: "Coorg",
-        days: "3 Days · 2 Nights",
-        price: "₹12,999",
-        tag: "BESTSELLER",
-        image:
-        "https://images.unsplash.com/photo-1593693411515-c20261bcad6e?auto=format&fit=crop&w=900&q=85",
-    },
-    {
-        slug: "ooty",
-        name: "Ooty Hills",
-        place: "Ooty",
-        days: "3 Days · 2 Nights",
-        price: "₹14,499",
-        tag: "POPULAR",
-        image:
-        "https://images.unsplash.com/photo-1589136777351-fdc9c9cab193?auto=format&fit=crop&w=900&q=85",
-    },
-    {
-        slug: "goa",
-        name: "Goa Getaway",
-        place: "Goa",
-        days: "4 Days · 3 Nights",
-        price: "₹18,999",
-        tag: "BEACH PICK",
-        image:
-        "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=900&q=85",
-    },
-    {
-        slug: "mysuru",
-        name: "Royal Mysuru",
-        place: "Mysuru",
-        days: "2 Days · 1 Night",
-        price: "₹8,499",
-        tag: "WEEKEND",
-        image:
-        "https://images.unsplash.com/photo-1600112356915-089abb8fc71a?auto=format&fit=crop&w=900&q=85",
-    },
-    {
-        slug: "chikmagalur",
-        name: "Chikmagalur Trails",
-        place: "Chikmagalur",
-        days: "3 Days · 2 Nights",
-        price: "₹13,799",
-        tag: "NATURE",
-        image:
-        "https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=900&q=85",
     },
 ];
 
@@ -142,7 +90,7 @@ function Booking({ onSearch, initialSearch }) {
         onSearch({ service, pickup, destination, scheduledFor });
     }, [pickup, destination]);
     return (
-        <div className="relative col-start-2 row-start-1 z-[4] block w-full translate-z-0 rounded-[18px] border border-white/90 bg-white/95 p-[25px] shadow-[0_30px_80px_rgba(10,30,61,0.18)] backdrop-blur-[18px] [backface-visibility:hidden] [text-shadow:none] animate-[bookingEnter_0.72s_cubic-bezier(0.22,1,0.36,1)_0.14s_both] motion-reduce:animate-none [&_input:focus]:shadow-none [&_input:focus]:outline-none [&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none max-[1000px]:col-start-2 max-[1000px]:row-start-1 max-[1000px]:m-0 max-[780px]:col-start-1 max-[780px]:row-start-2 max-[780px]:mx-auto max-[780px]:max-w-[520px] max-[780px]:self-center max-[780px]:bg-white max-[650px]:-mt-6 max-[650px]:max-w-none max-[650px]:rounded-[14px] max-[650px]:p-[18px]" id="book">
+        <div className="relative col-start-2 row-start-1 z-[4] block w-full translate-z-0 rounded-[18px] border border-white/90 bg-white/95 p-[25px] shadow-[0_30px_80px_rgba(10,30,61,0.18)] backdrop-blur-[18px] [backface-visibility:hidden] [text-shadow:none] animate-[bookingEnter_0.72s_cubic-bezier(0.22,1,0.36,1)_0.14s_both] motion-reduce:animate-none [&_input:focus]:shadow-none [&_input:focus]:outline-none [&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none max-[1000px]:col-start-2 max-[1000px]:row-start-1 max-[1000px]:m-0 max-[780px]:col-start-1 max-[780px]:row-start-2 max-[780px]:mx-auto max-[780px]:max-w-[520px] max-[780px]:self-center max-[780px]:bg-white max-[650px]:row-start-1 max-[650px]:mt-4 max-[650px]:max-w-none max-[650px]:rounded-[14px] max-[650px]:p-[18px]" id="book">
             <div className="flex justify-between items-start mb-[17px] max-[650px]:mb-[13px]">
                 <div>
                     <small className="text-[8px] font-extrabold tracking-[1.4px] text-[#9a7010]">BOOK YOUR RIDE</small>
@@ -284,14 +232,22 @@ function Home() {
     const location = useLocation();
     const packageTrack = useRef(null);
     const [menu, setMenu] = useState(false);
+    const [livePackages, setLivePackages] = useState([]);
+    useEffect(() => {
+        let active = true;
+        fetchTourPackages({ limit: 8 })
+            .then((data) => { if (active) setLivePackages(data.items || []); })
+            .catch(() => { if (active) setLivePackages([]); });
+        return () => { active = false; };
+    }, []);
     return (
         <>
             <Navbar />
 
             <main id="home">
                 <section className="relative overflow-hidden bg-[#f2f4f6] pt-0 pb-[55px] max-[780px]:bg-[#eef1f4] max-[650px]:pb-12">
-                    <div className="relative mx-auto grid min-h-[720px] w-[min(1200px,calc(100%-48px))] grid-cols-[1fr_430px] items-center gap-[54px] max-[1000px]:grid-cols-[minmax(0,1fr)_420px] max-[1000px]:gap-[35px] max-[780px]:w-[min(1200px,calc(100%-28px))] max-[780px]:grid-cols-1 max-[780px]:items-start max-[780px]:gap-8 max-[780px]:pb-4 max-[650px]:w-[min(1200px,calc(100%-28px))] max-[650px]:gap-0">
-                        <div className="relative z-[3] col-start-1 row-start-1 min-w-0 pt-0 text-white [text-shadow:0_1px_12px_rgba(2,12,31,.16)] max-[780px]:min-h-[500px] max-[780px]:pt-[65px] max-[650px]:min-h-[410px] max-[650px]:pt-[35px] max-[420px]:min-h-[390px]">
+                    <div className="relative mx-auto grid min-h-[720px] w-[min(1200px,calc(100%-48px))] grid-cols-[1fr_430px] items-center gap-[54px] max-[1000px]:grid-cols-[minmax(0,1fr)_420px] max-[1000px]:gap-[35px] max-[780px]:w-[min(1200px,calc(100%-28px))] max-[780px]:grid-cols-1 max-[780px]:items-start max-[780px]:gap-8 max-[780px]:pb-4 max-[650px]:w-[min(1200px,calc(100%-28px))] max-[650px]:gap-4">
+                        <div className="relative z-[3] col-start-1 row-start-1 min-w-0 pt-0 text-white [text-shadow:0_1px_12px_rgba(2,12,31,.16)] max-[780px]:min-h-[500px] max-[780px]:pt-[65px] max-[650px]:row-start-2 max-[650px]:min-h-[410px] max-[650px]:pt-[35px] max-[420px]:min-h-[390px]">
                             <div className="flex items-center gap-[10px] text-[11px] font-extrabold tracking-[1.8px] text-[#f2c75b] max-[420px]:text-[9px] max-[420px]:tracking-[1.3px]">
                                 <span className="h-px w-9 bg-[#f2c75b]"></span>ONE FLEET. EVERY JOURNEY.
                             </div>
@@ -330,7 +286,7 @@ function Home() {
                                 </p>
                             </div>
                         </div>
-                        <div className="absolute top-0 bottom-0 left-1/2 z-[1] w-[78vw] -translate-x-[50vw] overflow-hidden [mask-image:linear-gradient(90deg,#000_0%,#000_48%,rgba(0,0,0,.94)_58%,rgba(0,0,0,.65)_72%,rgba(0,0,0,.18)_88%,transparent_100%)] after:absolute after:-inset-0.5 after:bg-[linear-gradient(90deg,rgba(2,13,35,.9)_0%,rgba(3,18,43,.77)_35%,rgba(5,24,52,.44)_58%,rgba(11,34,63,.12)_78%,transparent_100%)] after:content-[''] max-[1000px]:w-[82vw] max-[780px]:right-1/2 max-[780px]:bottom-auto max-[780px]:h-[590px] max-[780px]:w-screen max-[780px]:[mask-image:linear-gradient(180deg,#000_0%,#000_58%,rgba(0,0,0,.8)_73%,rgba(0,0,0,.28)_90%,transparent_100%)] max-[780px]:after:bg-[linear-gradient(90deg,rgba(2,13,35,.9),rgba(3,18,43,.36))] max-[650px]:h-[500px] max-[420px]:h-[465px]">
+                        <div className="absolute top-0 bottom-0 left-1/2 z-[1] w-[78vw] -translate-x-[50vw] overflow-hidden [mask-image:linear-gradient(90deg,#000_0%,#000_48%,rgba(0,0,0,.94)_58%,rgba(0,0,0,.65)_72%,rgba(0,0,0,.18)_88%,transparent_100%)] after:absolute after:-inset-0.5 after:bg-[linear-gradient(90deg,rgba(2,13,35,.9)_0%,rgba(3,18,43,.77)_35%,rgba(5,24,52,.44)_58%,rgba(11,34,63,.12)_78%,transparent_100%)] after:content-[''] max-[1000px]:w-[82vw] max-[780px]:right-1/2 max-[780px]:bottom-auto max-[780px]:h-[590px] max-[780px]:w-screen max-[780px]:[mask-image:linear-gradient(180deg,#000_0%,#000_58%,rgba(0,0,0,.8)_73%,rgba(0,0,0,.28)_90%,transparent_100%)] max-[780px]:after:bg-[linear-gradient(90deg,rgba(2,13,35,.9),rgba(3,18,43,.36))] max-[650px]:top-auto max-[650px]:bottom-0 max-[650px]:h-[500px] max-[420px]:h-[465px]">
                             <img
                                 src="/assets/rjs-fleet-hero.png"
                                 className="h-full w-full scale-[1.015] object-cover object-center [filter:saturate(.88)_contrast(1.03)]"
@@ -360,7 +316,7 @@ function Home() {
                     </div>
                 </section>
 
-                <section className="overflow-hidden bg-[#f7f8fa] py-[95px] max-[650px]:py-[65px]">
+                {livePackages.length > 0 && <section className="overflow-hidden bg-[#f7f8fa] py-[95px] max-[650px]:py-[65px]">
                     <div className="mx-auto mb-8 flex w-[min(1200px,calc(100%-48px))] items-end justify-between max-[650px]:w-[min(1200px,calc(100%-28px))] max-[650px]:items-start">
                         <div>
                             <span className="text-[9px] font-extrabold tracking-[1.5px] text-[#a4770d]">CURATED JOURNEYS</span>
@@ -391,29 +347,29 @@ function Home() {
                         </button>
                         <div className="mx-auto w-[min(1200px,calc(100%-48px))] overflow-hidden max-[650px]:w-[calc(100%-28px)]">
                             <div className="flex snap-x gap-4 overflow-x-auto px-px pt-1 pb-5 scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={packageTrack}>
-                                {popularPackages.map((pkg, index) => (
+                                {livePackages.map((pkg, index) => (
                                     <article
                                         className="group min-w-[255px] flex-[0_0_calc((100%-48px)/4)] cursor-pointer snap-start border border-[#e1e5ea] bg-white transition duration-300 hover:-translate-y-[7px] hover:border-[#c9971f] hover:shadow-[0_20px_45px_rgba(8,28,59,.12)] max-[900px]:flex-[0_0_calc((100%-16px)/2)] max-[650px]:min-w-[260px] max-[650px]:flex-[0_0_84%]"
-                                        key={pkg.name}
+                                        key={pkg._id}
                                         onClick={() => navigate(`/packages/${pkg.slug}`)}
                                     >
                                         <div className="relative h-[225px] overflow-hidden after:absolute after:inset-0 after:bg-[linear-gradient(180deg,transparent_55%,rgba(3,14,34,.55))] after:content-[''] max-[650px]:h-[215px]">
-                                            <img className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.055]" src={pkg.image} alt={pkg.name} />
-                                            <span className="absolute top-3 left-3 z-[2] bg-[var(--gold)] px-[7px] py-[5px] text-[7px] font-black tracking-[.7px] text-[var(--navy)]">{pkg.tag}</span>
+                                            <img className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.055]" src={packageImageUrl(pkg.coverImageUrl)} alt={pkg.title} />
+                                            <span className="absolute top-3 left-3 z-[2] bg-[var(--gold)] px-[7px] py-[5px] text-[7px] font-black tracking-[.7px] text-[var(--navy)]">{pkg.badge}</span>
                                             <i className="absolute right-3 bottom-[10px] z-[2] text-[10px] not-italic text-white">0{index + 1}</i>
                                         </div>
                                         <div className="p-[17px]">
-                                            <small className="text-[8px] font-extrabold tracking-[1px] text-[#a4770d]">{pkg.place.toUpperCase()}</small>
-                                            <h3 className="my-[5px] font-[Manrope] text-lg font-bold text-[var(--navy)]">{pkg.name}</h3>
+                                            <small className="text-[8px] font-extrabold tracking-[1px] text-[#a4770d]">FROM {pkg.originCity.toUpperCase()}</small>
+                                            <h3 className="my-[5px] font-[Manrope] text-lg font-bold text-[var(--navy)]">{pkg.title}</h3>
                                             <p className="m-0 flex items-center gap-1.5 text-[10px] text-[#76808e]">
                                                 <CalendarDays className="w-[13px]" />
-                                                {pkg.days}
+                                                {pkg.durationLabel}
                                             </p>
                                             <div className="mt-[15px] flex items-end justify-between border-t border-[#e4e7eb] pt-[13px]">
                                                 <span className="flex flex-col text-[7px] text-[#8a93a0]">
-                                                FROM <b className="font-[Manrope] text-base font-extrabold text-[var(--navy)]">{pkg.price}</b>
+                                                PACKAGE <b className="font-[Manrope] text-base font-extrabold text-[var(--navy)]">{formatPackagePrice(pkg.price)}</b>
                                                 </span>
-                                                <button className="grid h-[33px] w-[33px] place-items-center rounded-full border-0 bg-[var(--navy)] text-white" aria-label={`View ${pkg.name}`}>
+                                                <button className="grid h-[33px] w-[33px] place-items-center rounded-full border-0 bg-[var(--navy)] text-white" aria-label={`View ${pkg.title}`}>
                                                 <ArrowRight className="w-3.5" />
                                                 </button>
                                             </div>
@@ -435,7 +391,7 @@ function Home() {
                             <ChevronRight />
                         </button>
                     </div>
-                </section>
+                </section>}
 
                 <section className="bg-[var(--navy)] py-[110px] text-white max-[650px]:py-[70px]" id="about">
                     <div className="mx-auto grid w-[min(1200px,calc(100%-48px))] grid-cols-[1.08fr_.92fr] items-center gap-[85px] max-[1000px]:grid-cols-1 max-[1000px]:gap-[45px] max-[650px]:w-[min(1200px,calc(100%-28px))]">

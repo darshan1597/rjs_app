@@ -1,15 +1,44 @@
 import { useState } from "react";
 import { ArrowRight, CheckCircle2, Clock3, Headphones, MapPin, MessageCircle, Phone, Send } from "lucide-react";
+import { useLocation } from "react-router-dom";
 import Navbar from "../components/Navbar.jsx";
 import Footer from "../components/Footer.jsx";
+import { api } from "../lib/api.js";
 
 export default function Contact() {
-    const [submitted, setSubmitted] = useState(false);
+    const location = useLocation();
+    const selectedPackage = location.state?.package;
+    const [submitted, setSubmitted] = useState(null);
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState("");
 
-    const handleSubmit = (event) => {
+    const handleSubmit = async (event) => {
         event.preventDefault();
-        setSubmitted(true);
-        event.currentTarget.reset();
+        const form = event.currentTarget;
+        const values = new FormData(form);
+        setSubmitting(true);
+        setSubmitted(null);
+        setError("");
+        try {
+            const result = await api('/api/v1/website-enquiries', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: values.get('name'),
+                    phone: values.get('phone'),
+                    email: values.get('email'),
+                    travelType: values.get('travelType'),
+                    message: values.get('message'),
+                    website: values.get('website'),
+                    ...(selectedPackage?._id ? { packageId: selectedPackage._id } : {}),
+                }),
+            });
+            setSubmitted(result);
+            form.reset();
+        } catch (submissionError) {
+            setError(submissionError.message || 'Unable to submit your enquiry. Please try again.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -76,24 +105,26 @@ export default function Contact() {
                             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#edf8f2] text-[#2d8061] [&_svg]:w-5"><Headphones /></span>
                         </div>
                         <form className="grid grid-cols-2 gap-4 max-[600px]:grid-cols-1 [&_label>span]:mb-1.5 [&_label>span]:block [&_label>span]:text-[9px] [&_label>span]:font-extrabold [&_label>span]:tracking-[.8px] [&_label>span]:text-[#667183] [&_input]:h-[50px] [&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-[var(--line)] [&_input]:px-3.5 [&_input]:text-xs [&_input]:outline-0 [&_input:focus]:border-[#b88711] [&_input:focus]:shadow-[0_0_0_3px_rgba(238,178,27,.12)]" onSubmit={handleSubmit}>
-                            <label><span>FULL NAME</span><input required placeholder="Enter your full name" /></label>
-                            <label><span>MOBILE NUMBER</span><input required type="tel" placeholder="+91 98765 43210" /></label>
-                            <label><span>EMAIL ADDRESS</span><input required type="email" placeholder="you@example.com" /></label>
-                            <label><span>TRAVEL TYPE</span><input required placeholder="Local, outstation or package" /></label>
+                            <label><span>FULL NAME</span><input name="name" required minLength="2" maxLength="100" autoComplete="name" placeholder="Enter your full name" /></label>
+                            <label><span>MOBILE NUMBER</span><input name="phone" required type="tel" minLength="10" maxLength="18" autoComplete="tel" placeholder="+91 98765 43210" /></label>
+                            <label><span>EMAIL ADDRESS</span><input name="email" required type="email" maxLength="254" autoComplete="email" placeholder="you@example.com" /></label>
+                            <label><span>TRAVEL TYPE</span><input name="travelType" required minLength="2" maxLength="120" placeholder="Local, outstation or package" defaultValue={selectedPackage ? `Tour package - ${selectedPackage.title}` : ''} /></label>
                             <label className="col-span-2 max-[600px]:col-auto">
                                 <span>HOW CAN WE HELP?</span>
-                                <textarea className="min-h-[130px] w-full resize-y rounded-lg border border-[var(--line)] p-3.5 text-xs outline-0 focus:border-[#b88711] focus:shadow-[0_0_0_3px_rgba(238,178,27,.12)]" required placeholder="Tell us your destination, travel date, passengers and vehicle preference..." />
+                                <textarea name="message" className="min-h-[130px] w-full resize-y rounded-lg border border-[var(--line)] p-3.5 text-xs outline-0 focus:border-[#b88711] focus:shadow-[0_0_0_3px_rgba(238,178,27,.12)]" required minLength="10" maxLength="2000" placeholder="Tell us your destination, travel date, passengers and vehicle preference..." defaultValue={selectedPackage ? `I would like to book the ${selectedPackage.title} package (${selectedPackage.durationLabel}, ${selectedPackage.distanceKm} km).` : ''} />
                             </label>
-                            <button className="col-span-2 flex h-[52px] items-center justify-between rounded-lg border-0 bg-[var(--gold)] px-4 text-[11px] font-extrabold text-[var(--navy)] hover:-translate-y-0.5 hover:shadow-[0_10px_25px_rgba(183,132,7,.22)] max-[600px]:col-auto" type="submit">
-                                Submit enquiry <Send className="w-4" />
+                            <input className="hidden" name="website" tabIndex="-1" autoComplete="off" aria-hidden="true" />
+                            <button disabled={submitting} className="col-span-2 flex h-[52px] items-center justify-between rounded-lg border-0 bg-[var(--gold)] px-4 text-[11px] font-extrabold text-[var(--navy)] hover:-translate-y-0.5 hover:shadow-[0_10px_25px_rgba(183,132,7,.22)] disabled:cursor-wait disabled:opacity-60 max-[600px]:col-auto" type="submit">
+                                {submitting ? 'Submitting...' : 'Submit enquiry'} <Send className="w-4" />
                             </button>
                         </form>
                         {submitted && (
                             <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-[#b9dfcf] bg-[#eaf7f1] p-3.5 text-[#236c52] [&_svg]:mt-0.5 [&_svg]:w-4">
                                 <CheckCircle2 />
-                                <span className="flex flex-col"><b className="text-[11px]">Enquiry submitted successfully</b><small className="mt-1 text-[9px]">Our travel desk will contact you shortly.</small></span>
+                                <span className="flex flex-col"><b className="text-[11px]">Enquiry submitted successfully</b><small className="mt-1 text-[9px]">Reference {submitted.enquiryNumber}. Our travel desk will contact you shortly.</small></span>
                             </div>
                         )}
+                        {error && <p role="alert" className="mt-4 rounded-lg border border-[#f1c5c5] bg-[#fff1f1] p-3.5 text-[10px] text-[#b83232]">{error}</p>}
                     </div>
                 </section>
             </main>

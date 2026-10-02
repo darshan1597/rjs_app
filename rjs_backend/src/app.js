@@ -16,6 +16,7 @@ import { driverRouter } from './modules/drivers/driver.routes.js';
 import { vehicleRouter } from './modules/vehicles/vehicle.routes.js';
 import { bookingRouter } from './modules/bookings/booking.routes.js';
 import { tourPackageRouter } from './modules/tour-packages/tour-package.routes.js';
+import { publicTourPackageRouter } from './modules/tour-packages/public-tour-package.routes.js';
 import { driverFiles, mediaRouter, tourPackageImages, vehicleImages } from './modules/media/media.routes.js';
 import { paymentRouter } from './modules/payments/payment.routes.js';
 import { razorpayWebhookRouter } from './modules/payments/razorpay-webhook.routes.js';
@@ -36,6 +37,8 @@ import { customerWalletRouter } from './modules/wallets/wallet.routes.js';
 import { adminWalletRouter } from './modules/wallets/admin-wallet.routes.js';
 import { financeRouter } from './modules/finance/finance.routes.js';
 import { razorpayxWebhookRouter } from './modules/wallets/razorpayx-webhook.routes.js';
+import { publicWebsiteEnquiryRouter } from './modules/website-enquiries/public-website-enquiry.routes.js';
+import { adminWebsiteEnquiryRouter } from './modules/website-enquiries/admin-website-enquiry.routes.js';
 
 function createApp() {
   const app = express();
@@ -67,6 +70,8 @@ function createApp() {
   app.use(express.urlencoded({ extended: false }));
 
   app.use('/api/v1/health', healthRouter);
+  app.use('/api/v1/tour-packages', publicTourPackageRouter);
+  app.use('/api/v1/website-enquiries', publicWebsiteEnquiryRouter);
   app.get('/api/v1/admin/monitoring', authenticateAdmin, (req, res, next) => {
     if (req.admin.accountType !== 'SUPER_ADMIN') return next(new AppError(403, 'FORBIDDEN', 'Only super admins can view monitoring'));
     return res.json({ success: true, data: monitoring.snapshot() });
@@ -81,6 +86,7 @@ function createApp() {
   app.use('/api/v1/admin/vehicles', vehicleRouter);
   app.use('/api/v1/admin/bookings', bookingRouter);
   app.use('/api/v1/admin/enquiries', enquiryRouter);
+  app.use('/api/v1/admin/website-enquiries', adminWebsiteEnquiryRouter);
   app.use('/api/v1/admin/tour-packages', tourPackageRouter);
   app.use('/api/v1/admin/media', mediaRouter);
   app.use('/api/v1/media/tour-package-images', tourPackageImages);
